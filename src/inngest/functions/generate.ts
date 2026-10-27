@@ -6,6 +6,7 @@ import { decodeError, guard } from "@/lib/errors-codec";
 import { addTokens, finalizeGeneration, loadContext } from "@/lib/generation";
 import { updateJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
+import { indexGeneration } from "@/lib/qa/index-generation";
 import { planOutline } from "@/lib/pipeline/plan";
 import { PROMPT_VERSION, planModel, writeModel } from "@/lib/pipeline/types";
 import { fetchSnapshot } from "@/lib/snapshot";
@@ -39,7 +40,7 @@ export const generateWiki = inngest.createFunction(
     try {
       const genId = await step.run("init", () => randomUUID());
       generationId = genId;
-      await step.run("mark-running", () => updateJob(jobId, { status: "running", step: "Fetching source from GitHub", generationId: genId }));
+      await step.run("mark-running", () => updateJob(jobId, { status: "running", step: "Fetching source from GitHub" }));
 
       const ingested = await step.run("ingest", () =>
         guard(async () => {
@@ -67,7 +68,7 @@ export const generateWiki = inngest.createFunction(
               .insert(repoFiles)
               .values(snap.files.slice(i, i + 50).map((f) => ({ ...f, generationId: genId })));
           }
-          await updateJob(jobId, { repoId: repo.id, owner: snap.owner, name: snap.name, step: "Planning outline" });
+          await updateJob(jobId, { repoId: repo.id, generationId: genId, owner: snap.owner, name: snap.name, step: "Planning outline" });
           return { files: snap.files.length };
         }),
       );
@@ -100,6 +101,16 @@ export const generateWiki = inngest.createFunction(
         });
       }
 
+      await step.run("index", async () => {
+        await updateJob(jobId, { step: "Indexing for Q&A" });
+        try {
+          return await indexGeneration(genId);
+        } catch (e) {
+          // Q&A degrades to unavailable but the wiki itself is still published.
+          logger.error({ jobId, generationId: genId, err: e }, "indexing failed");
+          return null;
+        }
+      });
       await step.run("finalize", () => finalizeGeneration(genId, jobId));
       return { generationId: genId, failed: failed.length };
     } catch (e) {

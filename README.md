@@ -33,9 +33,13 @@ bun run dev                  # http://localhost:3000
 - Partial failures finish as `done` with `errorCode=PARTIAL`; failed pages can be retried.
 - Progress is streamed to the UI over SSE.
 
+### Q&A
+After the pages are written, code and wiki sections are chunked and embedded (`gemini-embedding-001`, 768 dims, pgvector; vectors are reused for unchanged files by blob SHA). The **Ask** tab (`/wiki/<user>/<repo>/chat`) streams answers from `POST /api/chat`, a Vercel AI SDK tool-calling agent with `search_code` (hybrid vector + full-text, rank-fused), `read_file` and `list_files`. Answers cite exact lines pinned to the commit SHA. Limit: 60 questions per session per hour.
+
 ## API
 - `POST /api/jobs` `{ url, force? }` → `{ jobId }` | `400` | `409 { jobId }` | `429`
 - `GET /api/jobs/:id`, `GET /api/jobs/:id/stream` (SSE), `POST /api/jobs/:id/retry`
+- `POST /api/chat` `{ owner, repo, messages, conversationId? }` → UI message stream
 - `/api/inngest` is the Inngest serve endpoint.
 
 ## Scripts
