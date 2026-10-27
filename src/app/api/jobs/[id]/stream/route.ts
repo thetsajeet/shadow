@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getCurrentUser } from "@/lib/current-user";
 import { getJob, toView } from "@/lib/jobs";
 
 export const maxDuration = 60;
@@ -10,6 +11,10 @@ const MAX_MS = 55_000;
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   if (!z.string().uuid().safeParse(id).success) return new Response("Not found", { status: 404 });
+
+  const user = await getCurrentUser();
+  const owned = user && (await getJob(id))?.userId === user.id;
+  if (!owned) return new Response("Not found", { status: 404 });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

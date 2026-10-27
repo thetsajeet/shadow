@@ -8,6 +8,7 @@ import { PageTransition } from "@/components/page-transition";
 import { Sidebar } from "@/components/sidebar";
 import { Toc } from "@/components/toc";
 import { WikiHeader } from "@/components/wiki-header";
+import { getCurrentUser } from "@/lib/current-user";
 import { SAFE_SEGMENT } from "@/lib/repo-url";
 import { extractToc } from "@/lib/toc";
 import { readMeta, readPage } from "@/lib/wiki-store";
@@ -26,8 +27,8 @@ function NotFoundState({ user, repo }: { user: string; repo: string }) {
       <FileQuestion className="size-12 text-muted-foreground" />
       <h1 className="text-2xl font-bold">No wiki for {user}/{repo} yet</h1>
       <p className="text-muted-foreground">Generate documentation for this repository to see it here.</p>
-      <Link href="/" className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
-        Generate docs
+      <Link href="/profile" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+        Go to your profile
       </Link>
     </main>
   );
@@ -37,7 +38,7 @@ async function WikiContent({ params }: { params: Promise<Params> }) {
   await connection();
   const { user, repo, page } = await params;
   const valid = SAFE_SEGMENT.test(user) && SAFE_SEGMENT.test(repo) && (!page || (page.length === 1 && SAFE_SEGMENT.test(page[0])));
-  const meta = valid ? await readMeta(user, repo) : null;
+  const meta = valid ? await readMeta(user, repo, await getCurrentUser()) : null;
   if (!meta) return <NotFoundState user={user} repo={repo} />;
 
   const slug = page?.[0] ?? meta.pages[0]?.slug;
