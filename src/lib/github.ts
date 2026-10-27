@@ -46,9 +46,9 @@ function status(e: unknown): number | undefined {
   return typeof e === "object" && e && "status" in e ? Number((e as { status: unknown }).status) : undefined;
 }
 
-function mapError(e: unknown, what: string): ShadowError {
+export function mapError(e: unknown, what: string): ShadowError {
   const s = status(e);
-  if (s === 404) return new ShadowError("NOT_FOUND", "Repository not found, or it is private. Shadow only supports public repos.");
+  if (s === 404) return new ShadowError("NOT_FOUND", "Repository not found, or your GitHub account cannot access it.");
   if (s === 403 || s === 429) return new ShadowError("RATE_LIMITED", "GitHub API rate limit reached. Please try again later.", true);
   if (s && s >= 500) return new ShadowError("INGEST_FAILED", `GitHub is unavailable (${s}) while ${what}.`, true);
   return new ShadowError("INGEST_FAILED", `GitHub error while ${what}: ${e instanceof Error ? e.message : "unknown"}`);
@@ -79,5 +79,28 @@ export async function downloadTarball({ user, repo }: RepoRef, sha: string, user
     return new Uint8Array(res.data as ArrayBuffer);
   } catch (e) {
     throw mapError(e, "downloading source");
+  }
+}
+
+export interface CommitComparison {
+  aheadBy: number;
+  commits: { sha: string; message: string; author: string | null; date: string | null }[];
+}
+
+/** Commits on `head` that are not in `base`; used only to describe how far behind a wiki is. */
+export async function compareCommits({ user, repo }: RepoRef, base: string, head: string, userToken?: string): Promise<CommitComparison> {
+  try {
+    const { data } = await octokit(userToken).rest.repos.compareCommitsWithBasehead({ owner: user, repo, basehead: `${base}...${head}`, per_page: 10 });
+    return {
+      aheadBy: data.ahead_by,
+      commits: data.commits.slice(-10).reverse().map((c) => ({
+        sha: c.sha,
+        message: c.commit.message.split("\n")[0],
+        author: c.author?.login ?? c.commit.author?.name ?? null,
+        date: c.commit.author?.date ?? null,
+      })),
+    };
+  } catch (e) {
+    throw mapError(e, "comparing commits");
   }
 }
