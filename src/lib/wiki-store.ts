@@ -1,68 +1,67 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { SAFE_SEGMENT } from "./github";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { generations, pages, repos } from "@/db/schema";
+import { SAFE_SEGMENT } from "./repo-url";
 
 export interface WikiPageMeta {
   slug: string;
   title: string;
   summary: string;
+  parentSlug: string | null;
 }
 
 export interface WikiMeta {
+  repoId: string;
+  generationId: string;
   repo: string;
   branch: string;
   sha: string;
   generatedAt: string;
+  status: "done" | "partial";
   pages: WikiPageMeta[];
 }
 
-const ROOT = path.join(process.cwd(), "data", "wiki");
-
-function safe(...segments: string[]) {
-  for (const s of segments) {
-    if (!SAFE_SEGMENT.test(s) || s === "." || s === "..") {
-      throw new Error("Invalid path segment");
-    }
-  }
+function validSegments(...s: string[]) {
+  return s.every((x) => SAFE_SEGMENT.test(x) && x !== "." && x !== "..");
 }
 
-export function wikiDir(user: string, repo: string) {
-  safe(user, repo);
-  return path.join(ROOT, user, repo);
+export async function findRepo(user: string, name: string) {
+  if (!validSegments(user, name)) return null;
+  const [row] = await db()
+    .select()
+    .from(repos)
+    .where(and(sql`lower(${repos.owner}) = ${user.toLowerCase()}`, sql`lower(${repos.name}) = ${name.toLowerCase()}`));
+  return row ?? null;
 }
 
-export async function writeWiki(
-  user: string,
-  repo: string,
-  meta: WikiMeta,
-  pages: Record<string, string>,
-) {
-  const dir = wikiDir(user, repo);
-  const tmp = `${dir}.tmp-${Date.now()}`;
-  await fs.mkdir(path.join(tmp, "pages"), { recursive: true });
-  for (const [slug, md] of Object.entries(pages)) {
-    safe(slug);
-    await fs.writeFile(path.join(tmp, "pages", `${slug}.md`), md, "utf8");
-  }
-  await fs.writeFile(path.join(tmp, "meta.json"), JSON.stringify(meta, null, 2), "utf8");
-  await fs.rm(dir, { recursive: true, force: true });
-  await fs.rename(tmp, dir);
+/** Metadata for the repo's current (last successful) generation. */
+export async function readMeta(user: string, name: string): Promise<WikiMeta | null> {
+  const repo = await findRepo(user, name);
+  if (!repo?.currentGenerationId) return null;
+  const [gen] = await db().select().from(generations).where(eq(generations.id, repo.currentGenerationId));
+  if (!gen || (gen.status !== "done" && gen.status !== "partial")) return null;
+  const rows = await db()
+    .select({ slug: pages.slug, title: pages.title, summary: pages.summary, parentSlug: pages.parentSlug })
+    .from(pages)
+    .where(and(eq(pages.generationId, gen.id), eq(pages.status, "done")))
+    .orderBy(asc(pages.position));
+  return {
+    repoId: repo.id,
+    generationId: gen.id,
+    repo: `${repo.owner}/${repo.name}`,
+    branch: gen.branch,
+    sha: gen.commitSha,
+    generatedAt: (gen.finishedAt ?? gen.startedAt).toISOString(),
+    status: gen.status,
+    pages: rows,
+  };
 }
 
-export async function readMeta(user: string, repo: string): Promise<WikiMeta | null> {
-  try {
-    const raw = await fs.readFile(path.join(wikiDir(user, repo), "meta.json"), "utf8");
-    return JSON.parse(raw) as WikiMeta;
-  } catch {
-    return null;
-  }
-}
-
-export async function readPage(user: string, repo: string, slug: string): Promise<string | null> {
-  try {
-    safe(slug);
-    return await fs.readFile(path.join(wikiDir(user, repo), "pages", `${slug}.md`), "utf8");
-  } catch {
-    return null;
-  }
+export async function readPage(generationId: string, slug: string): Promise<string | null> {
+  if (!validSegments(slug)) return null;
+  const [row] = await db()
+    .select({ markdown: pages.markdown })
+    .from(pages)
+    .where(and(eq(pages.generationId, generationId), eq(pages.slug, slug), eq(pages.status, "done")));
+  return row?.markdown ?? null;
 }

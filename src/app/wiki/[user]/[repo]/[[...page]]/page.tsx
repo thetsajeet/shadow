@@ -42,7 +42,7 @@ async function WikiContent({ params }: { params: Promise<Params> }) {
 
   const slug = page?.[0] ?? meta.pages[0]?.slug;
   const current = meta.pages.find((p) => p.slug === slug);
-  const md = current ? await readPage(user, repo, current.slug) : null;
+  const md = current ? await readPage(meta.generationId, current.slug) : null;
   const base = `/wiki/${user}/${repo}`;
 
   return (
