@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Shadow
 
-## Getting Started
+Paste a public GitHub repo URL and Shadow generates a DeepWiki-style documentation site: an LLM-planned outline, per-page Markdown with Mermaid diagrams and source links pinned to the commit SHA.
 
-First, run the development server:
+## Stack
+Next.js 16 (App Router), React 19, TypeScript, Bun, LangGraph JS + Gemini, Tailwind, shadcn/ui, Aceternity-style components, Framer Motion, react-markdown + shiki + mermaid.
 
+## Setup
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
+cp .env.example .env.local   # then set GOOGLE_API_KEY
+bun run dev                  # http://localhost:3000
 ```
+Requires `git` on the PATH.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Env var | Purpose | Default |
+|---|---|---|
+| `GOOGLE_API_KEY` | Gemini API key (required) | – |
+| `GEMINI_MODEL` | model for page writing | `gemini-3.1-flash-lite` |
+| `GEMINI_PLAN_MODEL` | model for outline planning | same as `GEMINI_MODEL` |
+| `JOB_TIMEOUT_MS` | global job timeout | `900000` |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How it works
+`ingest → plan_outline → generate_page × N (Send fan-out, concurrency 3) → assemble` (`src/lib/graph/`).
+- Default branch only, shallow single-branch clone; the HEAD SHA is used in all source links.
+- Binary/lock/build/large (>200KB) files are filtered; repos with more than 500 files are rejected.
+- One job at a time server-wide (`409 { error: "busy", currentRepo }`); job state is in memory.
+- Wikis are written to `data/wiki/<user>/<repo>/` (gitignored); resubmitting overwrites.
+- Viewer: `/wiki/<user>/<repo>/<page>`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## API
+- `POST /api/jobs` `{ url }` → `{ jobId }` | `400` | `409`
+- `GET /api/jobs/:id` → `{ status, step, progress: { done, total }, repo, wikiPath?, error? }`
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Scripts
+`bun run dev`, `bun run lint`, `bun run build`, `bun run start`.
