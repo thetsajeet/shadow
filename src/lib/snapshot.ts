@@ -40,6 +40,8 @@ export interface SnapshotFile {
 }
 
 export interface Snapshot {
+  owner: string;
+  name: string;
   branch: string;
   sha: string;
   description: string | null;
@@ -112,5 +114,5 @@ export async function fetchSnapshot(ref: RepoRef): Promise<Snapshot> {
   }
   if (files.length === 0) throw new ShadowError("INGEST_FAILED", "No readable source files found in this repository.");
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { branch: info.defaultBranch, sha, description: info.description, files };
+  return { owner: info.owner, name: info.name, branch: info.defaultBranch, sha, description: info.description, files };
 }
