@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   customType,
   index,
   integer,
@@ -16,6 +17,64 @@ const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 export const EMBED_DIMS = 768;
 
+
+// ---- better-auth core tables (GitHub SSO only) ----
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  image: text("image"),
+  githubLogin: text("github_login").notNull(),
+  githubId: text("github_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const session = pgTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    token: text("token").notNull().unique(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("session_user_idx").on(t.userId)],
+);
+
+export const account = pgTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("account_user_idx").on(t.userId)],
+);
+
+export const verification = pgTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const repos = pgTable(
   "repos",
   {
@@ -24,6 +83,8 @@ export const repos = pgTable(
     name: text("name").notNull(),
     defaultBranch: text("default_branch").notNull(),
     description: text("description"),
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "set null" }),
+    visibility: text("visibility", { enum: ["public", "private"] }).notNull().default("public"),
     currentGenerationId: uuid("current_generation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -114,7 +175,7 @@ export const jobs = pgTable(
     generationId: uuid("generation_id").references(() => generations.id, { onDelete: "set null" }),
     owner: text("owner").notNull(),
     name: text("name").notNull(),
-    sessionId: text("session_id").notNull(),
+    userId: text("user_id").notNull(),
     clientIp: text("client_ip"),
     inngestRunId: text("inngest_run_id"),
     status: text("status", { enum: ["queued", "running", "done", "error"] }).notNull().default("queued"),
@@ -126,7 +187,7 @@ export const jobs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("jobs_session_status_idx").on(t.sessionId, t.status), index("jobs_repo_idx").on(t.repoId), index("jobs_ip_created_idx").on(t.clientIp, t.createdAt)],
+  (t) => [index("jobs_session_status_idx").on(t.userId, t.status), index("jobs_repo_idx").on(t.repoId), index("jobs_ip_created_idx").on(t.clientIp, t.createdAt)],
 );
 
 export const conversations = pgTable(
@@ -134,10 +195,10 @@ export const conversations = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     generationId: uuid("generation_id").notNull().references(() => generations.id, { onDelete: "cascade" }),
-    sessionId: text("session_id").notNull(),
+    userId: text("user_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("conversations_session_idx").on(t.sessionId)],
+  (t) => [index("conversations_user_idx").on(t.userId)],
 );
 
 export const messages = pgTable(
@@ -158,7 +219,7 @@ export const feedback = pgTable("feedback", {
   id: uuid("id").primaryKey().defaultRandom(),
   targetType: text("target_type", { enum: ["page", "message"] }).notNull(),
   targetId: uuid("target_id").notNull(),
-  sessionId: text("session_id").notNull(),
+  userId: text("user_id").notNull(),
   rating: integer("rating").notNull(),
   comment: text("comment"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1,4 +1,6 @@
 export type ErrorCode =
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
   | "INVALID_URL"
   | "NOT_FOUND"
   | "PRIVATE"

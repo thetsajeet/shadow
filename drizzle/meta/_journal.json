@@ -15,6 +15,20 @@
       "when": 1793095176541,
       "tag": "0001_public_red_shift",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793116729059,
+      "tag": "0002_auth_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793116729300,
+      "tag": "0003_user_scoping",
+      "breakpoints": true
     }
   ]
 }
