@@ -11,6 +11,7 @@ export function normalizeOutline(raw: OutlinePage[], tree: string[]): OutlinePag
   const out: OutlinePage[] = [];
   for (const p of raw.slice(0, MAX_PAGES)) {
     let slug = p.slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "page";
+    if (slug === "chat") slug = "chat-docs"; // /chat is the Q&A route
     while (seen.has(slug)) slug += "-2";
     seen.add(slug);
     out.push({ ...p, slug, files: [...new Set(p.files.filter((f) => known.has(f)))] });
