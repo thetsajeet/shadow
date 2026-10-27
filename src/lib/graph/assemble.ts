@@ -1,4 +1,3 @@
-import { promises as fs } from "node:fs";
 import { updateJob } from "../jobs";
 import { writeWiki } from "../wiki-store";
 import type { GraphStateType } from "./state";
@@ -21,6 +20,5 @@ export async function assemble(state: GraphStateType): Promise<Partial<GraphStat
     },
     Object.fromEntries(pages.map((p) => [p.slug, p.markdown])),
   );
-  await fs.rm(state.workdir, { recursive: true, force: true });
   return { wikiPath: `/wiki/${user}/${repo}` };
 }

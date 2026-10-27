@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { parseRepoUrl, ShadowError } from "@/lib/github";
+import { ShadowError } from "@/lib/errors";
+import { parseRepoUrl } from "@/lib/repo-url";
 import { runWikiGraph } from "@/lib/graph";
 import { currentRepo, tryCreateJob, runJob } from "@/lib/jobs";
 
