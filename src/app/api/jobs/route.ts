@@ -4,7 +4,6 @@ import { parseRepoUrl, ShadowError } from "@/lib/github";
 import { runWikiGraph } from "@/lib/graph";
 import { currentRepo, tryCreateJob, runJob } from "@/lib/jobs";
 
-export const runtime = "nodejs";
 
 const JOB_TIMEOUT_MS = Number(process.env.JOB_TIMEOUT_MS ?? 15 * 60_000);
 const Body = z.object({ url: z.string().min(1).max(300) });
