@@ -20,28 +20,28 @@ export function JobStatus({ job, onRetry }: { job: JobView; onRetry?: () => void
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="w-full max-w-xl rounded-2xl border border-white/10 bg-white/60 p-5 text-left shadow-xl backdrop-blur dark:bg-white/5"
+      className="w-full rounded-lg border bg-muted/40 p-4 text-left"
     >
       <div className="mb-3 flex items-center gap-2 text-sm font-medium">
         {job.status === "done" ? (
-          <CheckCircle2 className="size-4 text-emerald-500" />
+          <CheckCircle2 className="size-4 text-primary" />
         ) : job.status === "error" ? (
-          <AlertCircle className="size-4 text-red-500" />
+          <AlertCircle className="size-4 text-destructive" />
         ) : (
-          <Loader2 className="size-4 animate-spin text-violet-500" />
+          <Loader2 className="size-4 animate-spin text-primary" />
         )}
         <span>{job.repo}</span>
       </div>
       {job.status === "error" ? (
-        <p className="text-sm text-red-500">{job.error}</p>
+        <p className="text-sm text-destructive">{job.error}</p>
       ) : job.status === "done" && job.wikiPath ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Link href={job.wikiPath} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+          <Link href={job.wikiPath} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             Open wiki <ArrowRight className="size-4" />
           </Link>
           {job.errorCode === "PARTIAL" && (
             <>
-              <span className="text-sm text-amber-600">{job.error}</span>
+              <span className="text-sm text-muted-foreground">{job.error}</span>
               <button type="button" onClick={onRetry} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-muted">
                 Retry failed pages
               </button>
