@@ -28,13 +28,11 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
     else toast.success(`Docs ready for ${j.repo}`);
   });
 
-  async function start(kind: "generate" | "sync", force = false) {
+  async function start(kind: "generate" | "sync") {
     if (!repo) return;
     setBusy(true);
     const res = await fetch(`/api/repos/${repo.fullName}/${kind}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force }),
     }).catch(() => null);
     const data = res ? await res.json().catch(() => ({})) : {};
     if (!res) toast.error("Could not reach the server");
@@ -43,7 +41,7 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
       if (data.jobId) return watch(data.jobId);
     } else if (!res.ok) toast.error(data.error ?? "Request failed");
     else if (data.reused || data.upToDate) {
-      toast.success("Docs are already up to date");
+      toast.success("Codebase already in sync");
       setRefresh((n) => n + 1);
     } else {
       toast.success(kind === "sync" ? "Sync started in the background" : "Submitted, generating docs in the background");
@@ -121,12 +119,10 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
                 <Link href={wikiPath}>
                   <Button variant={status.stale ? "outline" : "default"}>Open wiki <ArrowRight /></Button>
                 </Link>
-                {status.stale && (
-                  <Button onClick={() => start("sync")} disabled={!!running}>
-                    <RefreshCw />Sync {status.behindBy} new commit{status.behindBy === 1 ? "" : "s"}
-                  </Button>
-                )}
-                {!status.stale && <Button variant="ghost" onClick={() => start("generate", true)} disabled={!!running}>Regenerate</Button>}
+                <Button variant={status.stale ? "default" : "outline"} onClick={() => start("sync")} disabled={!!running}>
+                  <RefreshCw />
+                  {status.stale ? `Resync (${status.behindBy} new commit${status.behindBy === 1 ? "" : "s"})` : "Resync"}
+                </Button>
               </>
             )}
           </div>

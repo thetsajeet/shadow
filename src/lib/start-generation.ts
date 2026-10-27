@@ -26,7 +26,7 @@ export function assertOwnsRepo(user: CurrentUser, owner: string) {
   }
 }
 
-export async function startGeneration(user: CurrentUser, owner: string, name: string, opts: { force?: boolean; sync?: boolean; clientIp: string }): Promise<StartResult> {
+export async function startGeneration(user: CurrentUser, owner: string, name: string, opts: { sync?: boolean; clientIp: string }): Promise<StartResult> {
   assertOwnsRepo(user, owner);
   const active = await findActiveJob(owner, name);
   if (active) return { kind: "busy", jobId: active.id };
@@ -43,7 +43,8 @@ export async function startGeneration(user: CurrentUser, owner: string, name: st
   if (opts.sync && (!existing?.currentGenerationId || existing.ownerUserId !== user.id)) {
     throw new ShadowError("NOT_FOUND", "This repository has no documentation to sync yet.");
   }
-  if (existing?.currentGenerationId && !opts.force) {
+  // Never spend tokens when the wiki already matches the branch head.
+  if (existing?.currentGenerationId) {
     const [gen] = await db().select().from(generations).where(eq(generations.id, existing.currentGenerationId));
     if (gen?.commitSha === sha) {
       const job = await createJob({

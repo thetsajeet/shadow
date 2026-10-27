@@ -53,8 +53,8 @@ After the pages are written, code and wiki sections are chunked and embedded (`g
 
 ## API
 - `/api/auth/*` better-auth (GitHub only)
-- `POST /api/repos/:owner/:name/generate` `{ force? }` → `{ jobId }` | `401` | `403` | `409 { jobId }` | `503`
-- `POST /api/repos/:owner/:name/sync` → `{ jobId }` | `404` (not documented yet)
+- `POST /api/repos/:owner/:name/generate` → `{ jobId }` | `401` | `403` | `409 { jobId }` | `503`
+- `POST /api/repos/:owner/:name/sync` (the Resync button; checks the live head first and returns `{ upToDate: true }` without spending tokens when unchanged) → `{ jobId }` | `404` (not documented yet)
 - `GET /api/repos/:owner/:name/status` → staleness (`docSha`, `headSha`, `behindBy`, `syncing`)
 - `GET /api/jobs/:id`, `GET /api/jobs/:id/stream` (SSE), `POST /api/jobs/:id/retry` (job owner only)
 - `POST /api/chat` `{ owner, repo, messages, conversationId? }` → UI message stream (`401` signed out, `409` while syncing)
