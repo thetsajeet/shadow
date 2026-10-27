@@ -1,86 +1,86 @@
-import { randomUUID } from "node:crypto";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { jobs } from "@/db/schema";
 
-export type JobStatus = "queued" | "running" | "done" | "error";
+export type JobRow = typeof jobs.$inferSelect;
 
-export interface Job {
-  id: string;
-  status: JobStatus;
+export interface JobView {
+  status: JobRow["status"];
   step: string;
   progress: { done: number; total: number };
   repo: string;
   wikiPath?: string;
   error?: string;
-  createdAt: number;
+  errorCode?: string;
 }
 
-interface JobStore {
-  jobs: Map<string, Job>;
-  currentRepo: string | null;
+const STALE_MS = 30 * 60_000;
+
+export async function createJob(input: {
+  owner: string;
+  name: string;
+  sessionId: string;
+  clientIp: string;
+  status?: JobRow["status"];
+  generationId?: string;
+  repoId?: string;
+  step?: string;
+}) {
+  const [row] = await db().insert(jobs).values(input).returning();
+  return row;
 }
 
-const g = globalThis as unknown as { __shadowJobs?: JobStore };
-const store: JobStore = (g.__shadowJobs ??= { jobs: new Map(), currentRepo: null });
-
-export function currentRepo() {
-  return store.currentRepo;
+export async function getJob(id: string): Promise<JobRow | undefined> {
+  const [row] = await db().select().from(jobs).where(eq(jobs.id, id));
+  return row;
 }
 
-export function getJob(id: string) {
-  return store.jobs.get(id);
+export async function updateJob(id: string, patch: Partial<Omit<JobRow, "id" | "createdAt">>) {
+  await db().update(jobs).set({ ...patch, updatedAt: new Date() }).where(eq(jobs.id, id));
 }
 
-export function updateJob(id: string, patch: Partial<Job>) {
-  const job = store.jobs.get(id);
-  if (job) Object.assign(job, patch);
+export async function incrementJobDone(id: string) {
+  await db()
+    .update(jobs)
+    .set({ done: sql`${jobs.done} + 1`, updatedAt: new Date() })
+    .where(eq(jobs.id, id));
 }
 
-/** Returns null when the global lock is already held. */
-export function tryCreateJob(repo: string): Job | null {
-  if (store.currentRepo) return null;
-  store.currentRepo = repo;
-  const job: Job = {
-    id: randomUUID(),
-    status: "queued",
-    step: "Queued",
-    progress: { done: 0, total: 0 },
-    repo,
-    createdAt: Date.now(),
+/** One active job per browser session. Old unfinished rows are treated as abandoned. */
+export async function findActiveJob(sessionId: string): Promise<JobRow | undefined> {
+  const [row] = await db()
+    .select()
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.sessionId, sessionId),
+        inArray(jobs.status, ["queued", "running"]),
+        gt(jobs.updatedAt, new Date(Date.now() - STALE_MS)),
+      ),
+    )
+    .orderBy(desc(jobs.createdAt))
+    .limit(1);
+  return row;
+}
+
+export async function countRecentJobs(by: { clientIp?: string; sessionId?: string }, windowMs: number) {
+  const since = new Date(Date.now() - windowMs);
+  const cond = by.clientIp ? eq(jobs.clientIp, by.clientIp) : eq(jobs.sessionId, by.sessionId ?? "");
+  const [r] = await db()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(jobs)
+    .where(and(cond, gt(jobs.createdAt, since)));
+  return r?.n ?? 0;
+}
+
+export function toView(job: JobRow): JobView {
+  return {
+    status: job.status,
+    step: job.step,
+    progress: { done: job.done, total: job.total },
+    repo: `${job.owner}/${job.name}`,
+    wikiPath: job.status === "done" ? `/wiki/${job.owner}/${job.name}` : undefined,
+    error: job.errorMessage ?? undefined,
+    errorCode: job.errorCode ?? undefined,
   };
-  store.jobs.set(job.id, job);
-  // keep memory bounded
-  if (store.jobs.size > 50) {
-    const oldest = [...store.jobs.keys()][0];
-    store.jobs.delete(oldest);
-  }
-  return job;
-}
-
-export function releaseLock(repo: string) {
-  if (store.currentRepo === repo) store.currentRepo = null;
-}
-
-/** Runs fn while the lock is held; always releases it in finally. */
-export async function runJob(job: Job, fn: () => Promise<string>, timeoutMs: number, onTimeout?: () => void) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    updateJob(job.id, { status: "running", step: "Starting" });
-    const wikiPath = await Promise.race([
-      fn(),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          onTimeout?.();
-          reject(new Error("Job timed out"));
-        }, timeoutMs);
-      }),
-    ]);
-    updateJob(job.id, { status: "done", step: "Done", wikiPath });
-  } catch (e) {
-    updateJob(job.id, {
-      status: "error",
-      error: e instanceof Error ? e.message : "Unknown error",
-    });
-  } finally {
-    if (timer) clearTimeout(timer);
-    releaseLock(job.repo);
-  }
 }

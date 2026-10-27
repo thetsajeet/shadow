@@ -115,6 +115,7 @@ export const jobs = pgTable(
     owner: text("owner").notNull(),
     name: text("name").notNull(),
     sessionId: text("session_id").notNull(),
+    clientIp: text("client_ip"),
     inngestRunId: text("inngest_run_id"),
     status: text("status", { enum: ["queued", "running", "done", "error"] }).notNull().default("queued"),
     step: text("step").notNull().default("Queued"),
@@ -125,7 +126,7 @@ export const jobs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("jobs_session_status_idx").on(t.sessionId, t.status), index("jobs_repo_idx").on(t.repoId)],
+  (t) => [index("jobs_session_status_idx").on(t.sessionId, t.status), index("jobs_repo_idx").on(t.repoId), index("jobs_ip_created_idx").on(t.clientIp, t.createdAt)],
 );
 
 export const conversations = pgTable(

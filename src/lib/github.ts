@@ -28,6 +28,8 @@ export function octokit() {
 }
 
 export interface RepoInfo {
+  owner: string;
+  name: string;
   defaultBranch: string;
   description: string | null;
   sizeKb: number;
@@ -50,7 +52,7 @@ export async function fetchRepoInfo({ user, repo }: RepoRef): Promise<RepoInfo> 
     const { data } = await octokit().rest.repos.get({ owner: user, repo });
     if (data.private) throw new ShadowError("PRIVATE", "Private repositories are not supported.");
     if (!data.default_branch) throw new ShadowError("INGEST_FAILED", "Could not determine the default branch.");
-    return { defaultBranch: data.default_branch, description: data.description, sizeKb: data.size };
+    return { owner: data.owner.login, name: data.name, defaultBranch: data.default_branch, description: data.description, sizeKb: data.size };
   } catch (e) {
     throw e instanceof ShadowError ? e : mapError(e, "reading repository");
   }
