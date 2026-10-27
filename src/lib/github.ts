@@ -7,6 +7,9 @@ import type { RepoRef } from "./repo-url";
 
 export { SAFE_SEGMENT, parseRepoUrl, type RepoRef } from "./repo-url";
 
+// Don't hold a serverless function open waiting out long GitHub rate-limit windows.
+const MAX_RETRY_WAIT_S = 30;
+
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
 const g = globalThis as unknown as { __shadowOctokit?: InstanceType<typeof ThrottledOctokit> };
@@ -17,8 +20,8 @@ export function octokit() {
     userAgent: "shadow-wiki",
     request: { timeout: 30_000 },
     throttle: {
-      onRateLimit: (_retryAfter, _options, _octo, retryCount) => retryCount < 2,
-      onSecondaryRateLimit: (_retryAfter, _options, _octo, retryCount) => retryCount < 2,
+      onRateLimit: (retryAfter, _options, _octo, retryCount) => retryCount < 2 && retryAfter <= MAX_RETRY_WAIT_S,
+      onSecondaryRateLimit: (retryAfter, _options, _octo, retryCount) => retryCount < 2 && retryAfter <= MAX_RETRY_WAIT_S,
     },
   });
   return g.__shadowOctokit;

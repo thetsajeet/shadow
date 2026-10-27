@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const schema = z.object({
   DATABASE_URL: z.string().url(),
-  DATABASE_URL_DIRECT: z.string().url().optional(),
+  DATABASE_URL_DIRECT: z.preprocess((v) => (v === "" ? undefined : v), z.string().url().optional()),
   GITHUB_TOKEN: z.string().min(1),
   GOOGLE_API_KEY: z.string().min(1),
   GEMINI_MODEL: z.string().default("gemini-3.1-flash-lite"),
