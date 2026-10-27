@@ -6,7 +6,7 @@ export const generateRequested = eventType("wiki/generate.requested", {
     jobId: z.string().uuid(),
     owner: z.string(),
     name: z.string(),
-    sessionId: z.string(),
+    userId: z.string(),
   }),
 });
 
@@ -16,7 +16,7 @@ export const retryRequested = eventType("wiki/retry.requested", {
     generationId: z.string().uuid(),
     owner: z.string(),
     name: z.string(),
-    sessionId: z.string(),
+    userId: z.string(),
   }),
 });
 

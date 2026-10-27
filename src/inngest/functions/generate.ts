@@ -6,6 +6,7 @@ import { decodeError, guard } from "@/lib/errors-codec";
 import { addTokens, finalizeGeneration, loadContext } from "@/lib/generation";
 import { updateJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
+import { getUserGithubToken } from "@/lib/user-token";
 import { indexGeneration } from "@/lib/qa/index-generation";
 import { planOutline } from "@/lib/pipeline/plan";
 import { PROMPT_VERSION, planModel, writeModel } from "@/lib/pipeline/types";
@@ -27,15 +28,15 @@ export const generateWiki = inngest.createFunction(
   {
     id: "generate-wiki",
     triggers: [generateRequested],
-    // One run per browser session, and never two runs for the same repo.
+    // A user may run a couple of repos at once, but never two runs for the same repo.
     concurrency: [
-      { key: "event.data.sessionId", limit: 1 },
+      { key: "event.data.userId", limit: 2 },
       { key: "event.data.owner + '/' + event.data.name", limit: 1 },
     ],
     retries: 2,
   },
   async ({ event, step }) => {
-    const { jobId, owner, name } = event.data;
+    const { jobId, owner, name, userId } = event.data;
     let generationId: string | null = null;
     try {
       const genId = await step.run("init", () => randomUUID());
@@ -44,13 +45,21 @@ export const generateWiki = inngest.createFunction(
 
       const ingested = await step.run("ingest", () =>
         guard(async () => {
-          const snap = await fetchSnapshot({ user: owner, repo: name });
+          // The token is read here, inside the step, so it never appears in event payloads or step output.
+          const snap = await fetchSnapshot({ user: owner, repo: name }, await getUserGithubToken(userId));
           const [repo] = await db()
             .insert(repos)
-            .values({ owner: snap.owner, name: snap.name, defaultBranch: snap.branch, description: snap.description })
+            .values({
+              owner: snap.owner,
+              name: snap.name,
+              defaultBranch: snap.branch,
+              description: snap.description,
+              ownerUserId: userId,
+              visibility: snap.private ? "private" : "public",
+            })
             .onConflictDoUpdate({
               target: [repos.owner, repos.name],
-              set: { defaultBranch: snap.branch, description: snap.description },
+              set: { defaultBranch: snap.branch, description: snap.description, ownerUserId: userId, visibility: snap.private ? "private" : "public" },
             })
             .returning();
           await db().delete(generations).where(eq(generations.id, genId));
@@ -125,7 +134,7 @@ export const retryFailedPages = inngest.createFunction(
     id: "retry-failed-pages",
     triggers: [retryRequested],
     concurrency: [
-      { key: "event.data.sessionId", limit: 1 },
+      { key: "event.data.userId", limit: 2 },
       { key: "event.data.owner + '/' + event.data.name", limit: 1 },
     ],
     retries: 1,
