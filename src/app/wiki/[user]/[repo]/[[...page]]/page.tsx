@@ -1,6 +1,8 @@
 import { FileQuestion } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
+import { connection } from "next/server";
 import { Markdown } from "@/components/markdown";
 import { PageTransition } from "@/components/page-transition";
 import { Sidebar } from "@/components/sidebar";
@@ -10,7 +12,6 @@ import { SAFE_SEGMENT } from "@/lib/repo-url";
 import { extractToc } from "@/lib/toc";
 import { readMeta, readPage } from "@/lib/wiki-store";
 
-export const dynamic = "force-dynamic";
 
 type Params = { user: string; repo: string; page?: string[] };
 
@@ -32,7 +33,8 @@ function NotFoundState({ user, repo }: { user: string; repo: string }) {
   );
 }
 
-export default async function WikiPage({ params }: { params: Promise<Params> }) {
+async function WikiContent({ params }: { params: Promise<Params> }) {
+  await connection();
   const { user, repo, page } = await params;
   const valid = SAFE_SEGMENT.test(user) && SAFE_SEGMENT.test(repo) && (!page || (page.length === 1 && SAFE_SEGMENT.test(page[0])));
   const meta = valid ? await readMeta(user, repo) : null;
@@ -70,5 +72,13 @@ export default async function WikiPage({ params }: { params: Promise<Params> }) 
         </aside>
       </div>
     </div>
+  );
+}
+
+export default function WikiPage({ params }: { params: Promise<Params> }) {
+  return (
+    <Suspense fallback={<div className="min-h-screen animate-pulse bg-muted/30" />}>
+      <WikiContent params={params} />
+    </Suspense>
   );
 }
