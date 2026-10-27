@@ -16,45 +16,57 @@ export function Hero() {
   const [url, setUrl] = useState("");
   const [job, setJob] = useState<JobView | null>(null);
   const [running, setRunning] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const source = useRef<EventSource | null>(null);
 
   const stop = useCallback(() => {
-    if (timer.current) clearInterval(timer.current);
-    timer.current = null;
+    source.current?.close();
+    source.current = null;
   }, []);
   useEffect(() => stop, [stop]);
 
-  const poll = useCallback(
-    (jobId: string) => {
-      stop();
-      timer.current = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
-          if (!res.ok) throw new Error("Job not found (server may have restarted)");
-          const j = (await res.json()) as JobView;
-          setJob(j);
-          if (j.status === "done") {
-            stop();
-            setRunning(false);
-            toast.success(`Docs ready for ${j.repo}`, {
-              action: j.wikiPath ? { label: "Open", onClick: () => (window.location.href = j.wikiPath!) } : undefined,
-            });
-          } else if (j.status === "error") {
-            stop();
-            setRunning(false);
-            toast.error(j.error ?? "Generation failed");
-          }
-        } catch (e) {
-          stop();
-          setRunning(false);
-          const error = e instanceof Error ? e.message : "Lost connection to the server";
-          setJob((p) => (p ? { ...p, status: "error", error } : p));
-          toast.error(error);
-        }
-      }, 2000);
+  const handle = useCallback(
+    (j: JobView) => {
+      setJob(j);
+      if (j.status === "done") {
+        stop();
+        setRunning(false);
+        if (j.errorCode === "PARTIAL") toast.warning(j.error ?? "Some pages failed");
+        else toast.success(`Docs ready for ${j.repo}`);
+      } else if (j.status === "error") {
+        stop();
+        setRunning(false);
+        toast.error(j.error ?? "Generation failed");
+      }
     },
     [stop],
   );
+
+  const watch = useCallback(
+    (jobId: string) => {
+      stop();
+      const es = new EventSource(`/api/jobs/${jobId}/stream`);
+      source.current = es;
+      es.addEventListener("job", (ev) => handle(JSON.parse((ev as MessageEvent).data) as JobView));
+      es.addEventListener("error", (ev) => {
+        // Named "error" events carry data; plain connection errors let EventSource reconnect.
+        if ((ev as MessageEvent).data) {
+          stop();
+          setRunning(false);
+          toast.error("Lost track of this job (it may have expired).");
+        }
+      });
+    },
+    [handle, stop],
+  );
+
+  async function retry() {
+    if (!jobId) return;
+    const res = await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
+    if (!res.ok) return toast.error("Could not retry");
+    setRunning(true);
+    watch(jobId);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -78,7 +90,11 @@ export function Hero() {
       const data = await res.json();
       if (res.status === 409) {
         toast.warning(`Busy, currently processing ${data.currentRepo}`);
-        setRunning(false);
+        if (data.jobId) {
+          setJobId(data.jobId);
+          setRunning(true);
+          watch(data.jobId);
+        } else setRunning(false);
         return;
       }
       if (!res.ok) {
@@ -86,9 +102,10 @@ export function Hero() {
         setRunning(false);
         return;
       }
-      toast.success("Submitted, generating docs in the background");
+      setJobId(data.jobId);
+      toast.success(data.reused ? "Docs are already up to date" : "Submitted, generating docs in the background");
       setJob({ status: "queued", step: "Queued", progress: { done: 0, total: 0 }, repo: normalized.replace("https://github.com/", "") });
-      poll(data.jobId);
+      watch(data.jobId);
     } catch {
       toast.error("Could not reach the server");
       setRunning(false);
@@ -126,7 +143,7 @@ export function Hero() {
             {running ? "Generating…" : "Generate docs"}
           </Button>
         </form>
-        {job && <JobStatus job={job} />}
+        {job && <JobStatus job={job} onRetry={retry} />}
       </div>
     </main>
   );

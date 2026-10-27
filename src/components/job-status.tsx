@@ -11,9 +11,10 @@ export interface JobView {
   repo: string;
   wikiPath?: string;
   error?: string;
+  errorCode?: string;
 }
 
-export function JobStatus({ job }: { job: JobView }) {
+export function JobStatus({ job, onRetry }: { job: JobView; onRetry?: () => void }) {
   const pct = job.progress.total ? Math.round((job.progress.done / job.progress.total) * 100) : 5;
   return (
     <motion.div
@@ -34,9 +35,19 @@ export function JobStatus({ job }: { job: JobView }) {
       {job.status === "error" ? (
         <p className="text-sm text-red-500">{job.error}</p>
       ) : job.status === "done" && job.wikiPath ? (
-        <Link href={job.wikiPath} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
-          Open wiki <ArrowRight className="size-4" />
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link href={job.wikiPath} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+            Open wiki <ArrowRight className="size-4" />
+          </Link>
+          {job.errorCode === "PARTIAL" && (
+            <>
+              <span className="text-sm text-amber-600">{job.error}</span>
+              <button type="button" onClick={onRetry} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-muted">
+                Retry failed pages
+              </button>
+            </>
+          )}
+        </div>
       ) : (
         <>
           <p className="mb-2 text-sm text-muted-foreground">
