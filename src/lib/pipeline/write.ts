@@ -21,21 +21,25 @@ export async function writePage({ ctx, page, outline, files }: WriteInput) {
     if (raw === undefined || budget <= 0) continue;
     const text = raw.slice(0, Math.min(PER_FILE_CHARS, budget));
     budget -= text.length;
-    chunks.push(`### FILE: ${f}\nSource link: ${blobUrl(ref, ctx.sha, f)}\n\`\`\`\n${text}\n\`\`\``);
+    const numbered = text.split("\n").map((l, i) => `${String(i + 1).padStart(4)}| ${l}`).join("\n");
+    chunks.push(`### FILE: ${f}\nSource link: ${blobUrl(ref, ctx.sha, f)}\n\`\`\`\n${numbered}\n\`\`\``);
   }
 
   const prompt = `You are a senior engineer writing one page of a wiki for the GitHub repo ${ctx.owner}/${ctx.name}.
 
 Page title: ${page.title}
 Page purpose: ${page.summary}
-Other pages in the wiki: ${outline.map((p) => p.title).join(", ")}
+Other pages in the wiki (link to them where relevant with relative links): ${outline.map((p) => `[${p.title}](/wiki/${ctx.owner}/${ctx.name}/${p.slug})`).join(", ")}
 
-Write the page in GitHub-flavoured Markdown. Requirements:
-- Do NOT include the page title as an H1; start with an intro paragraph, then use ## and ### headings.
-- Be accurate and grounded ONLY in the provided files and README; do not invent APIs.
-- Include Mermaid diagrams in \`\`\`mermaid fenced blocks where they help (architecture, flows, sequences). Use simple, valid syntax; quote labels containing special characters.
-- Use tables and code snippets where helpful.
-- Cite sources inline as Markdown links using the exact "Source link" URLs given, e.g. [\`src/app.ts\`](${blobUrl(ref, ctx.sha, "src/app.ts")}).
+Write a thorough, well-structured page in GitHub-flavoured Markdown. Requirements:
+- Do NOT include the page title as an H1; start with a short intro paragraph saying what this page covers, then use ## and ### headings.
+- Explain the "why" and how things work, not just what files exist: responsibilities, key functions/classes, control flow, data structures, edge cases and gotchas.
+- Be accurate and grounded ONLY in the provided files and README; never invent APIs, flags or behaviour. If something is unclear, say so.
+- Files are shown with line numbers in the form "  12| code". Do not copy the line-number prefix into code snippets.
+- Cite sources inline as Markdown links using the file's "Source link" with a line anchor, e.g. [\`src/app.ts:10-24\`](${blobUrl(ref, ctx.sha, "src/app.ts")}#L10-L24). Cite specific line ranges for non-trivial claims.
+- Include at least one Mermaid diagram in a \`\`\`mermaid block when the topic involves structure or flow (flowchart, sequenceDiagram, classDiagram). Use simple valid syntax; wrap labels containing special characters in double quotes; avoid parentheses in unquoted labels.
+- Use short code snippets, tables (e.g. options, APIs) and lists where they aid understanding.
+- End with a "## Related pages" section linking 2 to 4 relevant pages from the list above.
 - Output only the Markdown.
 
 ## README (context)
