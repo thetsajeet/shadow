@@ -11,6 +11,7 @@ vi.mock("@/db", () => ({ db: () => holder.db, schema: undefined }));
 
 const { finalizeGeneration } = await import("../generation");
 const { createJob, getJob, findActiveJob, toView } = await import("../jobs");
+const { hybridSearch, toOrQuery } = await import("../qa/retrieve");
 const { readMeta, readPage } = await import("../wiki-store");
 
 let db: ReturnType<typeof drizzle<typeof schema>>;
@@ -85,5 +86,19 @@ describe("persistence (pglite)", () => {
     expect(nearest.rows[0]).toEqual({ path: "a.ts" });
     const fts = await db.execute(sql`select path from chunks where tsv @@ plainto_tsquery('english', 'hello')`);
     expect(fts.rows).toHaveLength(1);
+  });
+
+  it("hybrid search fuses vector and full-text hits", async () => {
+    const { gen } = await seed(["done"]);
+    const unit = (i: number) => Array.from({ length: schema.EMBED_DIMS }, (_, j) => (j === i ? 1 : 0));
+    await db.insert(schema.chunks).values([
+      { generationId: gen.id, path: "a.ts", startLine: 1, endLine: 5, content: "function parseConfig reads yaml", embedding: unit(0) },
+      { generationId: gen.id, path: "b.ts", startLine: 1, endLine: 5, content: "renders the sidebar component", embedding: unit(1) },
+    ]);
+    const byVector = await hybridSearch(gen.id, "zzz", 2, unit(1));
+    expect(byVector[0].path).toBe("b.ts");
+    const byText = await hybridSearch(gen.id, "how is config parsed? parseConfig", 2, null);
+    expect(byText[0].path).toBe("a.ts");
+    expect(toOrQuery("How does it work?")).toBe("how or does or work");
   });
 });
