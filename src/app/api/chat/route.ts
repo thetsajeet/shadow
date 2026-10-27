@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import { getCurrentUser } from "@/lib/current-user";
+import { findActiveJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
 import { runAgent } from "@/lib/qa/agent";
 import { SAFE_SEGMENT } from "@/lib/repo-url";
@@ -35,6 +36,10 @@ export async function POST(req: Request) {
 
   const meta = await readMeta(owner, repo, user);
   if (!meta) return NextResponse.json({ error: "No wiki found for this repository" }, { status: 404 });
+
+  if (await findActiveJob(owner, repo)) {
+    return NextResponse.json({ error: "This wiki is being updated. Ask is unavailable until the sync finishes.", code: "SYNCING" }, { status: 409 });
+  }
 
   const [{ n }] = await db()
     .select({ n: count() })

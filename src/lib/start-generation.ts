@@ -26,7 +26,7 @@ export function assertOwnsRepo(user: CurrentUser, owner: string) {
   }
 }
 
-export async function startGeneration(user: CurrentUser, owner: string, name: string, opts: { force?: boolean; clientIp: string }): Promise<StartResult> {
+export async function startGeneration(user: CurrentUser, owner: string, name: string, opts: { force?: boolean; sync?: boolean; clientIp: string }): Promise<StartResult> {
   assertOwnsRepo(user, owner);
   const active = await findActiveJob(owner, name);
   if (active) return { kind: "busy", jobId: active.id };
@@ -40,6 +40,9 @@ export async function startGeneration(user: CurrentUser, owner: string, name: st
   const sha = await getHeadSha({ user: owner, repo: name }, info.defaultBranch, token);
 
   const existing = await findRepo(info.owner, info.name);
+  if (opts.sync && (!existing?.currentGenerationId || existing.ownerUserId !== user.id)) {
+    throw new ShadowError("NOT_FOUND", "This repository has no documentation to sync yet.");
+  }
   if (existing?.currentGenerationId && !opts.force) {
     const [gen] = await db().select().from(generations).where(eq(generations.id, existing.currentGenerationId));
     if (gen?.commitSha === sha) {
@@ -53,7 +56,7 @@ export async function startGeneration(user: CurrentUser, owner: string, name: st
 
   const job = await createJob({ owner: info.owner, name: info.name, userId: user.id, clientIp: opts.clientIp });
   try {
-    await inngest.send(generateRequested.create({ jobId: job.id, owner: info.owner, name: info.name, userId: user.id }));
+    await inngest.send(generateRequested.create({ jobId: job.id, owner: info.owner, name: info.name, userId: user.id, baseGenerationId: opts.sync ? existing?.currentGenerationId ?? undefined : undefined }));
   } catch (e) {
     logger.error({ err: e, jobId: job.id }, "failed to enqueue generation");
     await updateJob(job.id, { status: "error", step: "Failed", errorCode: "INTERNAL", errorMessage: "Could not enqueue the job." });
