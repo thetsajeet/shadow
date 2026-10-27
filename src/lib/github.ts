@@ -1,74 +1,72 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { Octokit } from "octokit";
+import { retry } from "@octokit/plugin-retry";
+import { throttling } from "@octokit/plugin-throttling";
+import { env } from "@/env";
+import { ShadowError } from "./errors";
+import type { RepoRef } from "./repo-url";
 
-const execFileAsync = promisify(execFile);
+export { SAFE_SEGMENT, parseRepoUrl, type RepoRef } from "./repo-url";
 
-import { ShadowError, type RepoRef } from "./repo-url";
+const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
-export { SAFE_SEGMENT, ShadowError, parseRepoUrl, type RepoRef } from "./repo-url";
+const g = globalThis as unknown as { __shadowOctokit?: InstanceType<typeof ThrottledOctokit> };
+
+export function octokit() {
+  g.__shadowOctokit ??= new ThrottledOctokit({
+    auth: env().GITHUB_TOKEN,
+    userAgent: "shadow-wiki",
+    request: { timeout: 30_000 },
+    throttle: {
+      onRateLimit: (_retryAfter, _options, _octo, retryCount) => retryCount < 2,
+      onSecondaryRateLimit: (_retryAfter, _options, _octo, retryCount) => retryCount < 2,
+    },
+  });
+  return g.__shadowOctokit;
+}
 
 export interface RepoInfo {
   defaultBranch: string;
-  private: boolean;
+  description: string | null;
+  sizeKb: number;
+}
+
+function status(e: unknown): number | undefined {
+  return typeof e === "object" && e && "status" in e ? Number((e as { status: unknown }).status) : undefined;
+}
+
+function mapError(e: unknown, what: string): ShadowError {
+  const s = status(e);
+  if (s === 404) return new ShadowError("NOT_FOUND", "Repository not found, or it is private. Shadow only supports public repos.");
+  if (s === 403 || s === 429) return new ShadowError("RATE_LIMITED", "GitHub API rate limit reached. Please try again later.", true);
+  if (s && s >= 500) return new ShadowError("INGEST_FAILED", `GitHub is unavailable (${s}) while ${what}.`, true);
+  return new ShadowError("INGEST_FAILED", `GitHub error while ${what}: ${e instanceof Error ? e.message : "unknown"}`);
 }
 
 export async function fetchRepoInfo({ user, repo }: RepoRef): Promise<RepoInfo> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "shadow-wiki",
-  };
-  let res: Response;
   try {
-    res = await fetch(`https://api.github.com/repos/${user}/${repo}`, {
-      headers,
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch {
-    throw new ShadowError("Could not reach the GitHub API. Please try again.");
-  }
-  if (res.status === 404) {
-    throw new ShadowError("Repository not found, or it is private. Shadow only supports public repos.");
-  }
-  if (res.status === 403 || res.status === 429) {
-    throw new ShadowError("GitHub API rate limit reached. Please try again later.");
-  }
-  if (!res.ok) {
-    throw new ShadowError(`GitHub API error (${res.status}).`);
-  }
-  const data = (await res.json()) as { default_branch?: string; private?: boolean };
-  if (data.private) {
-    throw new ShadowError("Private repositories are not supported.");
-  }
-  if (!data.default_branch) {
-    throw new ShadowError("Could not determine the default branch.");
-  }
-  return { defaultBranch: data.default_branch, private: false };
-}
-
-export async function cloneRepo(ref: RepoRef, branch: string, dest: string): Promise<string> {
-  try {
-    await execFileAsync(
-      "git",
-      [
-        "clone",
-        "--depth",
-        "1",
-        "--single-branch",
-        "--branch",
-        branch,
-        `https://github.com/${ref.user}/${ref.repo}.git`,
-        dest,
-      ],
-      { timeout: 120_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
-    );
-    const { stdout } = await execFileAsync("git", ["-C", dest, "rev-parse", "HEAD"]);
-    return stdout.trim();
+    const { data } = await octokit().rest.repos.get({ owner: user, repo });
+    if (data.private) throw new ShadowError("PRIVATE", "Private repositories are not supported.");
+    if (!data.default_branch) throw new ShadowError("INGEST_FAILED", "Could not determine the default branch.");
+    return { defaultBranch: data.default_branch, description: data.description, sizeKb: data.size };
   } catch (e) {
-    const msg = e instanceof Error ? e.message.split("\n")[0] : "unknown error";
-    throw new ShadowError(`Failed to clone repository: ${msg}`);
+    throw e instanceof ShadowError ? e : mapError(e, "reading repository");
   }
 }
 
-export function sourceUrl(ref: RepoRef, sha: string, path: string): string {
-  return `https://github.com/${ref.user}/${ref.repo}/blob/${sha}/${path}`;
+export async function getHeadSha({ user, repo }: RepoRef, branch: string): Promise<string> {
+  try {
+    const { data } = await octokit().rest.repos.getBranch({ owner: user, repo, branch });
+    return data.commit.sha;
+  } catch (e) {
+    throw mapError(e, "resolving the branch head");
+  }
+}
+
+export async function downloadTarball({ user, repo }: RepoRef, sha: string): Promise<Uint8Array> {
+  try {
+    const res = await octokit().rest.repos.downloadTarballArchive({ owner: user, repo, ref: sha });
+    return new Uint8Array(res.data as ArrayBuffer);
+  } catch (e) {
+    throw mapError(e, "downloading source");
+  }
 }
