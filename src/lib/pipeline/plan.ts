@@ -1,3 +1,4 @@
+import { analyzeRepo, formatAnalysis } from "./analyze";
 import { llmError, makeLlm, withRetry } from "./llm";
 import { OutlineSchema, planModel, type OutlinePage, type RepoContext } from "./types";
 
@@ -25,7 +26,18 @@ export async function planOutline(ctx: RepoContext): Promise<{ outline: OutlineP
   if (tree.length > 25_000) tree = tree.slice(0, 25_000) + "\n…(truncated)";
   const prompt = `You are planning a wiki-style documentation site for the GitHub repository ${ctx.owner}/${ctx.name}.
 ${ctx.description ? `Description: ${ctx.description}\n` : ""}
-Produce an outline of about 6 to 12 pages (fewer for tiny repos). Typical pages: Overview, Architecture, key modules/features, data flow, setup & development, configuration. Slugs must be lowercase kebab-case. The first page must have slug "overview". For each page list the repo-relative file paths (from the file tree below, exact paths only) that the page author should read.
+Produce an outline of 6 to 14 pages (fewer for tiny repos), ordered from high level to detailed. Cover, where the repo actually supports them:
+1. Overview (slug "overview"): purpose, audience, key features, tech stack, repo layout.
+2. Architecture: components, how they fit together, design decisions.
+3. Getting started & development: install, build, run, test, project scripts.
+4. Configuration & environment: env vars, config files, deployment/CI if present.
+5. One page per major module/subsystem/feature (core logic, public API, data models, CLI, UI, etc.).
+6. Data flow / request lifecycle, if the system has one.
+7. Testing, and extension/contribution points, if relevant.
+Do not invent pages the code does not support. Slugs must be lowercase kebab-case. For each page give a summary stating exactly what it should explain, and list 1 to 8 repo-relative file paths (exact paths from the file tree below) the author must read; prefer entry points and files central to the topic.
+
+## Automated analysis
+${formatAnalysis(analyzeRepo(ctx))}
 
 ## File tree
 ${tree}
