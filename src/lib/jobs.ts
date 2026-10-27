@@ -60,14 +60,17 @@ export function releaseLock(repo: string) {
 }
 
 /** Runs fn while the lock is held; always releases it in finally. */
-export async function runJob(job: Job, fn: () => Promise<string>, timeoutMs: number) {
+export async function runJob(job: Job, fn: () => Promise<string>, timeoutMs: number, onTimeout?: () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     updateJob(job.id, { status: "running", step: "Starting" });
     const wikiPath = await Promise.race([
       fn(),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Job timed out")), timeoutMs);
+        timer = setTimeout(() => {
+          onTimeout?.();
+          reject(new Error("Job timed out"));
+        }, timeoutMs);
       }),
     ]);
     updateJob(job.id, { status: "done", step: "Done", wikiPath });
