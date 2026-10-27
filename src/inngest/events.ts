@@ -7,6 +7,8 @@ export const generateRequested = eventType("wiki/generate.requested", {
     owner: z.string(),
     name: z.string(),
     userId: z.string(),
+    // Set for a sync: the generation to diff against and carry unchanged pages forward from.
+    baseGenerationId: z.string().uuid().optional(),
   }),
 });
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { generations, pages, repoFiles, repos } from "@/db/schema";
 import { decodeError, guard } from "@/lib/errors-codec";
@@ -11,6 +11,7 @@ import { indexGeneration } from "@/lib/qa/index-generation";
 import { planOutline } from "@/lib/pipeline/plan";
 import { PROMPT_VERSION, planModel, writeModel } from "@/lib/pipeline/types";
 import { fetchSnapshot } from "@/lib/snapshot";
+import { diffFiles, planReuse, repinLinks, shouldReplan } from "@/lib/sync-diff";
 import { inngest } from "../client";
 import { generateRequested, retryRequested } from "../events";
 import { writeWikiPage } from "./write-page";
@@ -22,6 +23,46 @@ async function failJob(jobId: string, generationId: string | null, e: unknown) {
   if (generationId) {
     await db().update(generations).set({ status: "error", error: message, finishedAt: new Date() }).where(eq(generations.id, generationId));
   }
+}
+
+/**
+ * Sync fast path: diff the new snapshot against the base generation by blob SHA, keep the old outline
+ * and copy pages whose sources did not change. Returns null when a full re-plan is needed.
+ */
+async function carryForward(genId: string, baseId: string, jobId: string): Promise<{ slugs: string[] } | null> {
+  const sigs = (id: string) => db().select({ path: repoFiles.path, blobSha: repoFiles.blobSha }).from(repoFiles).where(eq(repoFiles.generationId, id));
+  const [prevFiles, nextFiles] = await Promise.all([sigs(baseId), sigs(genId)]);
+  const diff = diffFiles(prevFiles, nextFiles);
+  if (shouldReplan(diff, prevFiles)) return null;
+
+  const basePages = await db().select().from(pages).where(eq(pages.generationId, baseId)).orderBy(asc(pages.position));
+  if (basePages.length === 0) return null;
+  const [base] = await db().select().from(generations).where(eq(generations.id, baseId));
+  const [next] = await db().select().from(generations).where(eq(generations.id, genId));
+  const [repo] = await db().select().from(repos).where(eq(repos.id, next.repoId));
+  const { keep, rewrite } = planReuse(basePages, diff);
+  const present = new Set(nextFiles.map((f) => f.path));
+  const keepSlugs = new Set(keep.map((p) => p.slug));
+
+  await db().delete(pages).where(eq(pages.generationId, genId));
+  await db().insert(pages).values(
+    basePages.map((p) => ({
+      generationId: genId,
+      slug: p.slug,
+      title: p.title,
+      summary: p.summary,
+      position: p.position,
+      parentSlug: p.parentSlug,
+      kind: p.kind,
+      sourceFiles: p.sourceFiles.filter((f) => present.has(f)),
+      ...(keepSlugs.has(p.slug)
+        ? { markdown: repinLinks(p.markdown ?? "", repo.owner, repo.name, base.commitSha, next.commitSha), status: "done" as const, tokens: 0 }
+        : {}),
+    })),
+  );
+  await db().update(generations).set({ outline: base.outline }).where(eq(generations.id, genId));
+  await updateJob(jobId, { total: rewrite.length, done: 0, step: rewrite.length ? "Updating changed pages" : "No page changes" });
+  return { slugs: rewrite.map((p) => p.slug) };
 }
 
 export const generateWiki = inngest.createFunction(
@@ -36,7 +77,7 @@ export const generateWiki = inngest.createFunction(
     retries: 2,
   },
   async ({ event, step }) => {
-    const { jobId, owner, name, userId } = event.data;
+    const { jobId, owner, name, userId, baseGenerationId } = event.data;
     let generationId: string | null = null;
     try {
       const genId = await step.run("init", () => randomUUID());
@@ -85,6 +126,8 @@ export const generateWiki = inngest.createFunction(
 
       const plan = await step.run("plan", () =>
         guard(async () => {
+          const reused = baseGenerationId ? await carryForward(genId, baseGenerationId, jobId) : null;
+          if (reused) return reused;
           const ctx = await loadContext(genId);
           const { outline, tokensIn, tokensOut } = await planOutline(ctx);
           await db().delete(pages).where(eq(pages.generationId, genId));
