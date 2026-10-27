@@ -40,7 +40,7 @@ export const generateWiki = inngest.createFunction(
     try {
       const genId = await step.run("init", () => randomUUID());
       generationId = genId;
-      await step.run("mark-running", () => updateJob(jobId, { status: "running", step: "Fetching source from GitHub", generationId: genId }));
+      await step.run("mark-running", () => updateJob(jobId, { status: "running", step: "Fetching source from GitHub" }));
 
       const ingested = await step.run("ingest", () =>
         guard(async () => {
@@ -68,7 +68,7 @@ export const generateWiki = inngest.createFunction(
               .insert(repoFiles)
               .values(snap.files.slice(i, i + 50).map((f) => ({ ...f, generationId: genId })));
           }
-          await updateJob(jobId, { repoId: repo.id, owner: snap.owner, name: snap.name, step: "Planning outline" });
+          await updateJob(jobId, { repoId: repo.id, generationId: genId, owner: snap.owner, name: snap.name, step: "Planning outline" });
           return { files: snap.files.length };
         }),
       );
