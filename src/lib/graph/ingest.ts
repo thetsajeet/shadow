@@ -5,6 +5,8 @@ import { cloneRepo, fetchRepoInfo, ShadowError } from "../github";
 import { updateJob } from "../jobs";
 import type { GraphStateType } from "./state";
 
+export const workDirFor = (jobId: string) => path.join(os.tmpdir(), `shadow-${jobId}`);
+
 export const MAX_FILES = 500;
 const MAX_FILE_BYTES = 200 * 1024;
 
@@ -60,7 +62,8 @@ export async function ingest(state: GraphStateType): Promise<Partial<GraphStateT
   const info = await fetchRepoInfo(state.repo);
 
   updateJob(state.jobId, { step: `Cloning ${info.defaultBranch}` });
-  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "shadow-"));
+  const workdir = workDirFor(state.jobId);
+  await fs.mkdir(workdir, { recursive: true });
   const clonePath = path.join(workdir, "repo");
   try {
     const sha = await cloneRepo(state.repo, info.defaultBranch, clonePath);
