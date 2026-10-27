@@ -21,9 +21,24 @@ function create() {
       },
     },
     user: {
+      // better-auth drops provider-mapped fields marked `input: false`, so these must accept input.
+      // The update hook below stops clients from setting them through /update-user.
       additionalFields: {
-        githubLogin: { type: "string", required: true, input: false },
-        githubId: { type: "string", required: true, input: false },
+        githubLogin: { type: "string", required: true },
+        githubId: { type: "string", required: true },
+      },
+    },
+    databaseHooks: {
+      user: {
+        update: {
+          before: async (data, ctx) => {
+            if (ctx?.path === "/update-user") {
+              const { githubLogin: _l, githubId: _i, ...safe } = data as Record<string, unknown>;
+              return { data: safe };
+            }
+            return { data };
+          },
+        },
       },
     },
     account: { encryptOAuthTokens: true },
