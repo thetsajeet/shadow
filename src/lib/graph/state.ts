@@ -33,7 +33,7 @@ export const GraphState = Annotation.Root({
   repo: Annotation<RepoInfoState>(),
   branch: Annotation<string>(),
   sha: Annotation<string>(),
-  workdir: Annotation<string>(),
+  files: Annotation<Record<string, string>>(),
   tree: Annotation<string[]>(),
   readme: Annotation<string>(),
   manifests: Annotation<Record<string, string>>(),

@@ -1,6 +1,4 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { sourceUrl } from "../github";
+import { blobUrl } from "../urls";
 import { getJob, updateJob } from "../jobs";
 import { llmError, makeLlm, withRetry } from "./llm";
 import { getModel, type GraphStateType, type OutlinePage } from "./state";
@@ -19,19 +17,15 @@ export async function generatePage({ page, state }: PageInput): Promise<Partial<
   const startedCount = (job?.progress.done ?? 0) + 1;
   updateJob(state.jobId, { step: `Writing page ${Math.min(startedCount, total)}/${total}: ${page.title}` });
 
-  const clonePath = path.join(state.workdir, "repo");
   let budget = PER_PAGE_CHARS;
   const chunks: string[] = [];
   for (const f of page.files) {
     if (budget <= 0) break;
-    try {
-      const raw = await fs.readFile(path.join(clonePath, f), "utf8");
-      const text = raw.slice(0, Math.min(PER_FILE_CHARS, budget));
-      budget -= text.length;
-      chunks.push(`### FILE: ${f}\nSource link: ${sourceUrl(state.repo, state.sha, f)}\n\`\`\`\n${text}\n\`\`\``);
-    } catch {
-      /* skip unreadable */
-    }
+    const raw = state.files[f];
+    if (raw === undefined) continue;
+    const text = raw.slice(0, Math.min(PER_FILE_CHARS, budget));
+    budget -= text.length;
+    chunks.push(`### FILE: ${f}\nSource link: ${blobUrl(state.repo, state.sha, f)}\n\`\`\`\n${text}\n\`\`\``);
   }
 
   const { user, repo } = state.repo;
@@ -46,7 +40,7 @@ Write the page in GitHub-flavoured Markdown. Requirements:
 - Be accurate and grounded ONLY in the provided files and README; do not invent APIs.
 - Include Mermaid diagrams in \`\`\`mermaid fenced blocks where they help (architecture, flows, sequences). Use simple, valid syntax; quote labels containing special characters.
 - Use tables and code snippets where helpful.
-- Cite sources inline as Markdown links using the exact "Source link" URLs given, e.g. [\`src/app.ts\`](https://github.com/${user}/${repo}/blob/${state.sha}/src/app.ts).
+- Cite sources inline as Markdown links using the exact "Source link" URLs given, e.g. [\`src/app.ts\`](${blobUrl(state.repo, state.sha, "src/app.ts")}).
 - Output only the Markdown.
 
 ## README (context)
