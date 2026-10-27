@@ -1,4 +1,5 @@
 import { blobUrl } from "../urls";
+import { verifyMarkdown } from "./verify";
 import { contentToText, llmError, makeLlm, withRetry } from "./llm";
 import { writeModel, type OutlinePage, type RepoContext } from "./types";
 
@@ -56,8 +57,18 @@ ${chunks.length ? "" : `## File tree\n${ctx.tree.slice(0, 200).join("\n")}`}`;
       .replace(/^```(?:markdown|md)\n([\s\S]*?)\n```\s*$/i, "$1")
       .trim();
     if (!markdown) throw new Error("Model returned an empty page");
-    return {
+    const verified = verifyMarkdown({
       markdown,
+      owner: ctx.owner,
+      name: ctx.name,
+      sha: ctx.sha,
+      tree: new Set(ctx.tree),
+      slugs: new Set(outline.map((p) => p.slug)),
+      lineCounts: Object.fromEntries(Object.entries(files).map(([k, v]) => [k, v.split("\n").length])),
+    });
+    return {
+      markdown: verified.markdown,
+      stats: verified.stats,
       tokensIn: res.usage_metadata?.input_tokens ?? 0,
       tokensOut: res.usage_metadata?.output_tokens ?? 0,
     };
