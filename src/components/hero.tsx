@@ -1,5 +1,5 @@
 "use client";
-import { Github, Sparkles } from "lucide-react";
+import { GitBranch, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -101,7 +101,7 @@ export function Hero() {
       <BackgroundBeams />
       <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
         <Link href="https://github.com" target="_blank" aria-label="GitHub">
-          <Github className="size-5" />
+          <GitBranch className="size-5" />
         </Link>
         <ThemeToggle />
       </div>
