@@ -38,7 +38,7 @@ export const writeWikiPage = inngest.createFunction(
           .where(eq(pages.id, row.id));
         await addTokens(generationId, res.tokensIn, res.tokensOut);
         await incrementJobDone(jobId);
-        logger.info({ jobId, generationId, slug, tokens: res.tokensIn + res.tokensOut }, "page written");
+        logger.info({ jobId, generationId, slug, tokens: res.tokensIn + res.tokensOut, ...res.stats }, "page written");
         return { slug };
       }),
     );
