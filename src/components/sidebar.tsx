@@ -21,10 +21,10 @@ export function Sidebar({ base, items, active }: { base: string; items: Item[]; 
             onClick={() => setOpen(false)}
             className={cn(
               "relative block rounded-md px-3 py-1.5 text-sm transition-colors hover:bg-muted",
-              active === p.slug ? "font-medium text-violet-600 dark:text-violet-400" : "text-muted-foreground",
+              active === p.slug ? "font-medium text-foreground" : "text-muted-foreground",
             )}
           >
-            {active === p.slug && <motion.span layoutId="sidebar-active" className="absolute inset-0 -z-10 rounded-md bg-violet-500/10" />}
+            {active === p.slug && <motion.span layoutId="sidebar-active" className="absolute inset-0 -z-10 rounded-md bg-muted" />}
             {p.title}
           </Link>
         </li>

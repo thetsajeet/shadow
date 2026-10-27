@@ -15,7 +15,7 @@ export function CopyButton({ text }: { text: string }) {
       }}
       className="absolute right-2 top-2 rounded-md border border-white/10 bg-black/40 p-1.5 text-neutral-300 opacity-0 transition hover:text-white group-hover:opacity-100"
     >
-      {copied ? <Check className="size-4 text-emerald-400" /> : <Copy className="size-4" />}
+      {copied ? <Check className="size-4 text-primary" /> : <Copy className="size-4" />}
     </button>
   );
 }

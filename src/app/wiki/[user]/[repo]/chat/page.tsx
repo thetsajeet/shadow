@@ -31,7 +31,7 @@ async function ChatContent({ params }: { params: Promise<Params> }) {
   }
   return (
     <div className="min-h-screen">
-      <WikiHeader repo={meta.repo} branch={meta.branch} sha={meta.sha} active="chat" />
+      <WikiHeader repo={meta.repo} branch={meta.branch} sha={meta.sha} visibility={meta.visibility} isOwner={meta.isOwner} active="chat" />
       <ChatPanel owner={user} repo={repo} />
     </div>
   );

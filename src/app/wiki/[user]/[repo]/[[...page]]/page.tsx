@@ -48,7 +48,7 @@ async function WikiContent({ params }: { params: Promise<Params> }) {
 
   return (
     <div className="min-h-screen">
-      <WikiHeader repo={meta.repo} branch={meta.branch} sha={meta.sha} />
+      <WikiHeader repo={meta.repo} branch={meta.branch} sha={meta.sha} visibility={meta.visibility} isOwner={meta.isOwner} />
       <div className="mx-auto flex max-w-[90rem]">
         <Sidebar base={base} items={meta.pages} active={current?.slug ?? ""} />
         <main className="min-w-0 flex-1 px-4 py-8 lg:px-10">
