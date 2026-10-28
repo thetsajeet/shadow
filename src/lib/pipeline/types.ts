@@ -29,4 +29,4 @@ export interface RepoContext {
 export const writeModel = () => env().GEMINI_MODEL;
 export const planModel = () => env().GEMINI_PLAN_MODEL ?? env().GEMINI_MODEL;
 
-export const PROMPT_VERSION = "v2";
+export const PROMPT_VERSION = "v3";

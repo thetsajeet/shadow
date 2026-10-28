@@ -32,7 +32,7 @@ export function HeroSection({ signedIn }: { signedIn: boolean }) {
             <SignInButton />
           )}
           <a href="#how">
-            <Button size="lg" variant="ghost">How it works</Button>
+            <Button size="lg" variant="ghost">Watch walkthrough</Button>
           </a>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.3, duration: 0.7 }} className="mt-16 w-full">

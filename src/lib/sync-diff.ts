@@ -62,6 +62,11 @@ export function planReuse(pages: PrevPage[], diff: FileDiff): ReusePlan {
   return { keep, rewrite };
 }
 
+/** A changed planning prompt invalidates the prior outline, even if source files are unchanged. */
+export function canReuseOutline(previousPromptVersion: string | null, currentPromptVersion: string | null): boolean {
+  return previousPromptVersion !== null && previousPromptVersion === currentPromptVersion;
+}
+
 /** Source links are pinned to a commit, so carried-forward pages must point at the new one. */
 export function repinLinks(markdown: string, owner: string, name: string, oldSha: string, newSha: string): string {
   const prefix = `https://github.com/${owner}/${name}/blob/`;

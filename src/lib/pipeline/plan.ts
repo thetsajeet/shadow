@@ -27,15 +27,19 @@ export async function planOutline(ctx: RepoContext): Promise<{ outline: OutlineP
   if (tree.length > 25_000) tree = tree.slice(0, 25_000) + "\n…(truncated)";
   const prompt = `You are planning a wiki-style documentation site for the GitHub repository ${ctx.owner}/${ctx.name}.
 ${ctx.description ? `Description: ${ctx.description}\n` : ""}
-Produce an outline of 6 to 14 pages (fewer for tiny repos), ordered from high level to detailed. Cover, where the repo actually supports them:
+Produce an outline of 8 to 14 pages for a typical repository, ordered from high level to detailed. Use fewer pages only when the repository is genuinely small or lacks distinct subsystems; do not compress several independent topics into one broad page just to keep the outline short. A page is a navigable wiki section, not a heading within another page.
+
+Cover each topic below when supported by the repository, using separate pages for substantial topics:
 1. Overview (slug "overview"): purpose, audience, key features, tech stack, repo layout.
-2. Architecture: components, how they fit together, design decisions.
-3. Getting started & development: install, build, run, test, project scripts.
-4. Configuration & environment: env vars, config files, deployment/CI if present.
-5. One page per major module/subsystem/feature (core logic, public API, data models, CLI, UI, etc.).
-6. Data flow / request lifecycle, if the system has one.
-7. Testing, and extension/contribution points, if relevant.
-Do not invent pages the code does not support. Slugs must be lowercase kebab-case. For each page give a summary stating exactly what it should explain, and list 1 to 8 repo-relative file paths (exact paths from the file tree below) the author must read; prefer entry points and files central to the topic.
+2. Architecture: components, boundaries, and design decisions.
+3. Getting started & development: install, build, run, test, and project scripts.
+4. Configuration & environment: environment variables, config files, deployment, and CI.
+5. Major modules or product features: give each substantial subsystem its own page, rather than combining unrelated modules.
+6. Public API, CLI, or user-facing workflows, when present.
+7. Data models, persistence, and important data flows, when present.
+8. Integrations, background jobs, or infrastructure, when present.
+9. Testing, security/authentication, operations, and extension points when relevant; split these into distinct pages when the codebase has enough material.
+Do not invent pages the code does not support, and avoid duplicate pages that cover the same files and responsibilities. Slugs must be lowercase kebab-case. For each page give a summary stating exactly what it should explain, and list 1 to 8 repo-relative file paths (exact paths from the file tree below) the author must read; prefer entry points and files central to the topic.
 
 ## Automated analysis
 ${formatAnalysis(analyzeRepo(ctx))}

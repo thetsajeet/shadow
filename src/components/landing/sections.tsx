@@ -29,26 +29,24 @@ export function Features() {
   );
 }
 
-const steps = [
-  { n: "01", title: "Sign in with GitHub", body: "Shadow lists the repositories you own. It only reads them." },
-  { n: "02", title: "Pick a repo and generate", body: "An outline is planned from the file tree, then each page is written from the files it covers." },
-  { n: "03", title: "Read, ask, and sync", body: "Browse the wiki, ask follow-up questions, and sync when the branch moves on." },
-];
-
 export function HowItWorks() {
   return (
     <section id="how" className="border-t bg-muted/30">
       <div className="mx-auto max-w-6xl px-4 py-24">
-        <h2 className="text-3xl font-semibold tracking-tight">How it works</h2>
-        <ol className="mt-12 grid gap-10 md:grid-cols-3">
-          {steps.map((s) => (
-            <li key={s.n}>
-              <span className="font-mono text-sm text-muted-foreground">{s.n}</span>
-              <h3 className="mt-2 text-lg font-medium">{s.title}</h3>
-              <p className="mt-1.5 text-sm text-muted-foreground">{s.body}</p>
-            </li>
-          ))}
-        </ol>
+        <div className="mx-auto mb-10 max-w-2xl text-center">
+          <h2 className="text-3xl font-semibold tracking-tight">See how Shadow works</h2>
+          <p className="mt-3 text-muted-foreground">From a GitHub repository to a source-linked wiki you can explore and ask questions about.</p>
+        </div>
+        <div className="mx-auto aspect-video w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl shadow-foreground/5">
+          <iframe
+            className="size-full"
+            src="https://www.youtube-nocookie.com/embed/hqqT7hgJaLI"
+            title="Shadow product walkthrough"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
+        </div>
       </div>
     </section>
   );
