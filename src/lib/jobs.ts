@@ -19,7 +19,7 @@ const STALE_MS = 30 * 60_000;
 export async function createJob(input: {
   owner: string;
   name: string;
-  sessionId: string;
+  userId: string;
   clientIp: string;
   status?: JobRow["status"];
   generationId?: string;
@@ -46,14 +46,15 @@ export async function incrementJobDone(id: string) {
     .where(eq(jobs.id, id));
 }
 
-/** One active job per browser session. Old unfinished rows are treated as abandoned. */
-export async function findActiveJob(sessionId: string): Promise<JobRow | undefined> {
+/** One active job per repository. Old unfinished rows are treated as abandoned. */
+export async function findActiveJob(owner: string, name: string): Promise<JobRow | undefined> {
   const [row] = await db()
     .select()
     .from(jobs)
     .where(
       and(
-        eq(jobs.sessionId, sessionId),
+        sql`lower(${jobs.owner}) = ${owner.toLowerCase()}`,
+        sql`lower(${jobs.name}) = ${name.toLowerCase()}`,
         inArray(jobs.status, ["queued", "running"]),
         gt(jobs.updatedAt, new Date(Date.now() - STALE_MS)),
       ),
@@ -63,13 +64,12 @@ export async function findActiveJob(sessionId: string): Promise<JobRow | undefin
   return row;
 }
 
-export async function countRecentJobs(by: { clientIp?: string; sessionId?: string }, windowMs: number) {
+export async function countRecentJobs(userId: string, windowMs: number) {
   const since = new Date(Date.now() - windowMs);
-  const cond = by.clientIp ? eq(jobs.clientIp, by.clientIp) : eq(jobs.sessionId, by.sessionId ?? "");
   const [r] = await db()
     .select({ n: sql<number>`count(*)::int` })
     .from(jobs)
-    .where(and(cond, gt(jobs.createdAt, since)));
+    .where(and(eq(jobs.userId, userId), gt(jobs.createdAt, since)));
   return r?.n ?? 0;
 }
 

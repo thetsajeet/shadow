@@ -4,10 +4,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { conversations, messages } from "@/db/schema";
+import { getCurrentUser } from "@/lib/current-user";
+import { findActiveJob } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
 import { runAgent } from "@/lib/qa/agent";
 import { SAFE_SEGMENT } from "@/lib/repo-url";
-import { getSessionId } from "@/lib/session";
 import { readMeta } from "@/lib/wiki-store";
 
 export const maxDuration = 60;
@@ -30,15 +31,21 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   const { owner, repo, messages: uiMessages } = parsed.data as z.infer<typeof Body> & { messages: UIMessage[] };
 
-  const meta = await readMeta(owner, repo);
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Sign in to ask questions", code: "UNAUTHENTICATED" }, { status: 401 });
+
+  const meta = await readMeta(owner, repo, user);
   if (!meta) return NextResponse.json({ error: "No wiki found for this repository" }, { status: 404 });
 
-  const sessionId = await getSessionId();
+  if (await findActiveJob(owner, repo)) {
+    return NextResponse.json({ error: "This wiki is being updated. Ask is unavailable until the sync finishes.", code: "SYNCING" }, { status: 409 });
+  }
+
   const [{ n }] = await db()
     .select({ n: count() })
     .from(messages)
     .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-    .where(and(eq(conversations.sessionId, sessionId), eq(messages.role, "user"), gt(messages.createdAt, new Date(Date.now() - 3_600_000))));
+    .where(and(eq(conversations.userId, user.id), eq(messages.role, "user"), gt(messages.createdAt, new Date(Date.now() - 3_600_000))));
   if (n >= MESSAGES_PER_HOUR) return NextResponse.json({ error: "Too many questions, try again later" }, { status: 429 });
 
   const question = lastUserText(uiMessages);
@@ -49,11 +56,11 @@ export async function POST(req: Request) {
     const [conv] = await db()
       .select({ id: conversations.id })
       .from(conversations)
-      .where(and(eq(conversations.id, conversationId), eq(conversations.sessionId, sessionId), eq(conversations.generationId, meta.generationId)));
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id), eq(conversations.generationId, meta.generationId)));
     if (!conv) conversationId = undefined;
   }
   if (!conversationId) {
-    const [conv] = await db().insert(conversations).values({ generationId: meta.generationId, sessionId }).returning({ id: conversations.id });
+    const [conv] = await db().insert(conversations).values({ generationId: meta.generationId, userId: user.id }).returning({ id: conversations.id });
     conversationId = conv.id;
   }
   const convId = conversationId;

@@ -1,0 +1,10 @@
+# Local Inngest Dev Server: `docker compose up` (UI on http://localhost:8288).
+# Run the app with INNGEST_DEV=1; it is discovered at /api/inngest on the host.
+services:
+  inngest:
+    image: inngest/inngest:latest
+    command: inngest dev -u http://host.docker.internal:3000/api/inngest
+    ports:
+      - "8288:8288"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

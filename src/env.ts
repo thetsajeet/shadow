@@ -11,6 +11,11 @@ const schema = z.object({
   INNGEST_EVENT_KEY: z.string().optional(),
   INNGEST_SIGNING_KEY: z.string().optional(),
   SESSION_SECRET: z.string().min(16),
+  BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
+  GITHUB_CLIENT_ID: z.string().min(1),
+  GITHUB_CLIENT_SECRET: z.string().min(1),
+  // read:user for the profile; repo is needed to read the user's private repositories.
+  GITHUB_OAUTH_SCOPES: z.string().default("read:user,user:email,repo"),
 });
 
 export type Env = z.infer<typeof schema>;

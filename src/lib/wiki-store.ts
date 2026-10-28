@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { generations, pages, repos } from "@/db/schema";
+import { canManage, canView, type Viewer } from "./access";
 import { SAFE_SEGMENT } from "./repo-url";
 
 export interface WikiPageMeta {
@@ -18,6 +19,8 @@ export interface WikiMeta {
   sha: string;
   generatedAt: string;
   status: "done" | "partial";
+  visibility: "public" | "private";
+  isOwner: boolean;
   pages: WikiPageMeta[];
 }
 
@@ -34,10 +37,11 @@ export async function findRepo(user: string, name: string) {
   return row ?? null;
 }
 
-/** Metadata for the repo's current (last successful) generation. */
-export async function readMeta(user: string, name: string): Promise<WikiMeta | null> {
+/** Metadata for the repo's current (last successful) generation, or null when missing or not visible to the viewer. */
+export async function readMeta(user: string, name: string, viewer: Viewer | null): Promise<WikiMeta | null> {
   const repo = await findRepo(user, name);
-  if (!repo?.currentGenerationId) return null;
+  // Non-viewers get the same "not found" as a missing wiki so private repos are not leaked.
+  if (!repo?.currentGenerationId || !canView(repo, viewer)) return null;
   const [gen] = await db().select().from(generations).where(eq(generations.id, repo.currentGenerationId));
   if (!gen || (gen.status !== "done" && gen.status !== "partial")) return null;
   const rows = await db()
@@ -53,6 +57,8 @@ export async function readMeta(user: string, name: string): Promise<WikiMeta | n
     sha: gen.commitSha,
     generatedAt: (gen.finishedAt ?? gen.startedAt).toISOString(),
     status: gen.status,
+    visibility: repo.visibility,
+    isOwner: canManage(repo, viewer),
     pages: rows,
   };
 }

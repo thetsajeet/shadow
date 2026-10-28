@@ -1,22 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fira_Code, Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
+const fira = Fira_Code({ variable: "--font-fira", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Shadow — instant wikis for GitHub repos",
-  description: "Paste a public GitHub repo URL and get wiki-style documentation with diagrams and source links.",
+  description: "Sign in with GitHub and turn your repositories into living documentation, with diagrams, source links and Q&A.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -24,7 +17,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${fira.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col"><ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}

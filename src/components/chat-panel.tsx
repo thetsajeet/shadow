@@ -63,6 +63,17 @@ function ToolChip({ part }: { part: { type: string; state?: string; input?: Reco
   );
 }
 
+/** The API returns `{ error }` JSON for 401/409/429; surface that instead of a generic message. */
+function chatErrorMessage(error: Error): string {
+  try {
+    const parsed = JSON.parse(error.message) as { error?: string };
+    if (parsed.error) return parsed.error;
+  } catch {
+    // not JSON
+  }
+  return "Something went wrong. Please try again.";
+}
+
 export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
   const [transport] = useState(() => {
     const conv: { id?: string } = {};
@@ -96,7 +107,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
       <div className="flex-1 space-y-6 overflow-y-auto py-8">
         {messages.length === 0 && (
           <div className="mt-16 text-center">
-            <Bot className="mx-auto size-10 text-violet-500" />
+            <Bot className="mx-auto size-10 text-primary" />
             <h1 className="mt-4 text-2xl font-bold">Ask about {owner}/{repo}</h1>
             <p className="mt-1 text-sm text-muted-foreground">Answers are grounded in the code and cite exact lines.</p>
             <div className="mt-6 flex flex-col gap-2">
@@ -111,7 +122,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
         {messages.map((m) => (
           <div key={m.id} className="flex gap-3">
             <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              {m.role === "user" ? <User className="size-4" /> : <Bot className="size-4 text-violet-500" />}
+              {m.role === "user" ? <User className="size-4" /> : <Bot className="size-4 text-primary" />}
             </div>
             <div className="min-w-0 flex-1">
               {m.role === "user" ? (
@@ -126,7 +137,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
           </div>
         ))}
         {status === "submitted" && <Loader2 className="ml-10 size-4 animate-spin text-muted-foreground" />}
-        {error && <p className="ml-10 text-sm text-red-500">Something went wrong. Please try again.</p>}
+        {error && <p className="ml-10 text-sm text-destructive">{chatErrorMessage(error)}</p>}
         <div ref={endRef} />
       </div>
       <form
@@ -141,7 +152,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask a question about this codebase…"
           maxLength={2000}
-          className="h-10 flex-1 rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-violet-500/50"
+          className="h-10 flex-1 rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
         />
         {busy ? (
           <Button type="button" variant="outline" onClick={() => stop()} aria-label="Stop">

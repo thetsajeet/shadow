@@ -6,7 +6,9 @@ export const generateRequested = eventType("wiki/generate.requested", {
     jobId: z.string().uuid(),
     owner: z.string(),
     name: z.string(),
-    sessionId: z.string(),
+    userId: z.string(),
+    // Set for a sync: the generation to diff against and carry unchanged pages forward from.
+    baseGenerationId: z.string().uuid().optional(),
   }),
 });
 
@@ -16,7 +18,7 @@ export const retryRequested = eventType("wiki/retry.requested", {
     generationId: z.string().uuid(),
     owner: z.string(),
     name: z.string(),
-    sessionId: z.string(),
+    userId: z.string(),
   }),
 });
 

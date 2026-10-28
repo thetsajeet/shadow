@@ -22,6 +22,10 @@ beforeAll(async () => {
   db = drizzle(client, { schema });
   holder.db = db;
   await migrate(db, { migrationsFolder: "./drizzle" });
+  await db.insert(schema.user).values([
+    { id: "u1", name: "Owner", email: "o@x.dev", githubLogin: "acme", githubId: "1" },
+    { id: "u2", name: "Other", email: "t@x.dev", githubLogin: "other", githubId: "2" },
+  ]);
 }, 60_000);
 
 async function seed(statuses: ("done" | "error")[]) {
@@ -30,7 +34,7 @@ async function seed(statuses: ("done" | "error")[]) {
   await db.insert(schema.pages).values(
     statuses.map((status, i) => ({ generationId: gen.id, slug: `p${i}`, title: `Page ${i}`, position: i, status, markdown: status === "done" ? `# p${i}` : null })),
   );
-  const job = await createJob({ owner: "Acme", name: "widgets", sessionId: "s1", clientIp: "1.1.1.1", generationId: gen.id });
+  const job = await createJob({ owner: "Acme", name: "widgets", userId: "u1", clientIp: "1.1.1.1", generationId: gen.id });
   return { repo, gen, job };
 }
 
@@ -47,20 +51,20 @@ describe("persistence (pglite)", () => {
     const [r] = await db.select().from(schema.repos).where(eq(schema.repos.id, repo.id));
     expect(r.currentGenerationId).toBe(gen.id);
 
-    const meta = await readMeta("acme", "WIDGETS");
+    const meta = await readMeta("acme", "WIDGETS", null);
     expect(meta?.status).toBe("partial");
     expect(meta?.pages.map((p) => p.slug)).toEqual(["p0", "p2"]);
     expect(await readPage(meta!.generationId, "p0")).toBe("# p0");
     expect(await readPage(meta!.generationId, "p1")).toBeNull();
-    expect(await readMeta("../etc", "passwd")).toBeNull();
+    expect(await readMeta("../etc", "passwd", null)).toBeNull();
   });
 
   it("marks the job failed when no page succeeded and keeps the previous wiki", async () => {
-    const before = await readMeta("acme", "widgets");
+    const before = await readMeta("acme", "widgets", null);
     const { gen, job } = await seed(["error", "error"]);
     await finalizeGeneration(gen.id, job.id);
     expect((await getJob(job.id))?.status).toBe("error");
-    expect((await readMeta("acme", "widgets"))?.generationId).toBe(before?.generationId);
+    expect((await readMeta("acme", "widgets", null))?.generationId).toBe(before?.generationId);
   });
 
   it("prunes old generations", async () => {
@@ -72,10 +76,23 @@ describe("persistence (pglite)", () => {
     expect(n).toBeLessThanOrEqual(5);
   });
 
-  it("tracks one active job per session", async () => {
-    await createJob({ owner: "a", name: "b", sessionId: "sess-x", clientIp: "2.2.2.2" });
-    expect((await findActiveJob("sess-x"))?.name).toBe("b");
-    expect(await findActiveJob("other")).toBeUndefined();
+  it("tracks one active job per repository", async () => {
+    await createJob({ owner: "a", name: "b", userId: "u1", clientIp: "2.2.2.2" });
+    expect((await findActiveJob("A", "B"))?.name).toBe("b");
+    expect(await findActiveJob("a", "other")).toBeUndefined();
+  });
+
+  it("hides private wikis from everyone but the owner", async () => {
+    const { repo } = await seed(["done"]);
+    await db.update(schema.repos).set({ ownerUserId: "u1", visibility: "private" }).where(eq(schema.repos.id, repo.id));
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.repoId, repo.id));
+    await db.update(schema.repos).set({ currentGenerationId: gen.id }).where(eq(schema.repos.id, repo.id));
+    expect(await readMeta("acme", "widgets", null)).toBeNull();
+    expect(await readMeta("acme", "widgets", { id: "u2" })).toBeNull();
+    expect((await readMeta("acme", "widgets", { id: "u1" }))?.isOwner).toBe(true);
+    await db.update(schema.repos).set({ visibility: "public" }).where(eq(schema.repos.id, repo.id));
+    const pub = await readMeta("acme", "widgets", { id: "u2" });
+    expect(pub?.isOwner).toBe(false);
   });
 
   it("stores embeddings and full-text vectors", async () => {

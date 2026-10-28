@@ -45,6 +45,7 @@ export interface Snapshot {
   branch: string;
   sha: string;
   description: string | null;
+  private: boolean;
   files: SnapshotFile[];
 }
 
@@ -74,13 +75,13 @@ function isBinary(buf: Uint8Array) {
   return false;
 }
 
-export async function fetchSnapshot(ref: RepoRef): Promise<Snapshot> {
-  const info = await fetchRepoInfo(ref);
+export async function fetchSnapshot(ref: RepoRef, userToken?: string): Promise<Snapshot> {
+  const info = await fetchRepoInfo(ref, userToken);
   if (info.sizeKb > MAX_TARBALL_KB) {
     throw new ShadowError("TOO_LARGE", "Repository is too large to process.");
   }
-  const sha = await getHeadSha(ref, info.defaultBranch);
-  const tarball = await downloadTarball(ref, sha);
+  const sha = await getHeadSha(ref, info.defaultBranch, userToken);
+  const tarball = await downloadTarball(ref, sha, userToken);
 
   let seen = 0;
   const files: SnapshotFile[] = [];
@@ -114,5 +115,5 @@ export async function fetchSnapshot(ref: RepoRef): Promise<Snapshot> {
   }
   if (files.length === 0) throw new ShadowError("INGEST_FAILED", "No readable source files found in this repository.");
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { owner: info.owner, name: info.name, branch: info.defaultBranch, sha, description: info.description, files };
+  return { owner: info.owner, name: info.name, branch: info.defaultBranch, sha, description: info.description, private: info.private, files };
 }

@@ -32,7 +32,7 @@ export function Toc({ items }: { items: TocItem[] }) {
               className={cn(
                 "-ml-px block border-l py-0.5 text-muted-foreground transition-colors hover:text-foreground",
                 i.depth === 3 ? "pl-6" : "pl-3",
-                active === i.id ? "border-violet-500 font-medium text-violet-600 dark:text-violet-400" : "border-transparent",
+                active === i.id ? "border-foreground font-medium text-foreground" : "border-transparent",
               )}
             >
               {i.text}
