@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffFiles, planReuse, repinLinks, shouldReplan } from "../sync-diff";
+import { canReuseOutline, diffFiles, planReuse, repinLinks, shouldReplan } from "../sync-diff";
 
 const f = (path: string, blobSha: string) => ({ path, blobSha });
 
@@ -23,6 +23,14 @@ describe("shouldReplan", () => {
   });
   it("replans when a new top-level directory appears", () => {
     expect(shouldReplan({ added: ["services/new.ts"], modified: [], removed: [] }, prev)).toBe(true);
+  });
+});
+
+describe("canReuseOutline", () => {
+  it("reuses only when both generations use the same known prompt version", () => {
+    expect(canReuseOutline("v2", "v2")).toBe(true);
+    expect(canReuseOutline("v2", "v3")).toBe(false);
+    expect(canReuseOutline(null, "v3")).toBe(false);
   });
 });
 

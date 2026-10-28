@@ -11,7 +11,7 @@ import { indexGeneration } from "@/lib/qa/index-generation";
 import { planOutline } from "@/lib/pipeline/plan";
 import { PROMPT_VERSION, planModel, writeModel } from "@/lib/pipeline/types";
 import { fetchSnapshot } from "@/lib/snapshot";
-import { diffFiles, planReuse, repinLinks, shouldReplan } from "@/lib/sync-diff";
+import { canReuseOutline, diffFiles, planReuse, repinLinks, shouldReplan } from "@/lib/sync-diff";
 import { inngest } from "../client";
 import { generateRequested, retryRequested } from "../events";
 import { writeWikiPage } from "./write-page";
@@ -30,6 +30,10 @@ async function failJob(jobId: string, generationId: string | null, e: unknown) {
  * and copy pages whose sources did not change. Returns null when a full re-plan is needed.
  */
 async function carryForward(genId: string, baseId: string, jobId: string): Promise<{ slugs: string[] } | null> {
+  const [base] = await db().select().from(generations).where(eq(generations.id, baseId));
+  const [next] = await db().select().from(generations).where(eq(generations.id, genId));
+  if (!base || !next || !canReuseOutline(base.promptVersion, next.promptVersion)) return null;
+
   const sigs = (id: string) => db().select({ path: repoFiles.path, blobSha: repoFiles.blobSha }).from(repoFiles).where(eq(repoFiles.generationId, id));
   const [prevFiles, nextFiles] = await Promise.all([sigs(baseId), sigs(genId)]);
   const diff = diffFiles(prevFiles, nextFiles);
@@ -37,8 +41,6 @@ async function carryForward(genId: string, baseId: string, jobId: string): Promi
 
   const basePages = await db().select().from(pages).where(eq(pages.generationId, baseId)).orderBy(asc(pages.position));
   if (basePages.length === 0) return null;
-  const [base] = await db().select().from(generations).where(eq(generations.id, baseId));
-  const [next] = await db().select().from(generations).where(eq(generations.id, genId));
   const [repo] = await db().select().from(repos).where(eq(repos.id, next.repoId));
   const { keep, rewrite } = planReuse(basePages, diff);
   const present = new Set(nextFiles.map((f) => f.path));
