@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { generations } from "@/db/schema";
+import { generations, repos } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { generateRequested } from "@/inngest/events";
 import type { CurrentUser } from "./current-user";
@@ -47,6 +47,11 @@ export async function startGeneration(user: CurrentUser, owner: string, name: st
   if (existing?.currentGenerationId) {
     const [gen] = await db().select().from(generations).where(eq(generations.id, existing.currentGenerationId));
     if (gen?.commitSha === sha) {
+      // The worker never runs on this path, so keep visibility in step with GitHub here.
+      const visibility = info.private ? "private" : "public";
+      if (existing.ownerUserId === user.id && existing.visibility !== visibility) {
+        await db().update(repos).set({ visibility }).where(eq(repos.id, existing.id));
+      }
       const job = await createJob({
         owner: info.owner, name: info.name, userId: user.id, clientIp: opts.clientIp,
         status: "done", step: "Up to date", repoId: existing.id, generationId: gen.id,

@@ -3,12 +3,13 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { SignInButton } from "@/components/sign-in-button";
 import { getCurrentUser } from "@/lib/current-user";
+import { safeNext } from "@/lib/safe-next";
 
 async function SignIn({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   await connection();
   const { next } = await searchParams;
   // Only same-origin relative paths are allowed as a post-login target.
-  const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/profile";
+  const target = safeNext(next);
   if (await getCurrentUser()) redirect(target);
   return (
     <main className="flex min-h-screen items-center justify-center px-4">

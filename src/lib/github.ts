@@ -48,6 +48,7 @@ function status(e: unknown): number | undefined {
 
 export function mapError(e: unknown, what: string): ShadowError {
   const s = status(e);
+  if (s === 401) return new ShadowError("UNAUTHENTICATED", "Your GitHub authorization expired. Please sign in again.");
   if (s === 404) return new ShadowError("NOT_FOUND", "Repository not found, or your GitHub account cannot access it.");
   if (s === 403 || s === 429) return new ShadowError("RATE_LIMITED", "GitHub API rate limit reached. Please try again later.", true);
   if (s && s >= 500) return new ShadowError("INGEST_FAILED", `GitHub is unavailable (${s}) while ${what}.`, true);

@@ -17,7 +17,7 @@ Put its Client ID and secret in `.env.local`. The app requests `read:user`, `use
 bun install
 cp .env.example .env.local   # fill in values (see below)
 bun run db:migrate           # needs DATABASE_URL_DIRECT
-bunx inngest-cli@latest dev  # Inngest Dev Server on :8288 (set INNGEST_DEV=1)
+docker compose up -d         # Inngest Dev Server on :8288 (set INNGEST_DEV=1)
 bun run dev                  # http://localhost:3000
 ```
 

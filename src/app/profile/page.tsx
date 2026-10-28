@@ -9,6 +9,7 @@ import { ProfileHeader } from "@/components/profile/profile-header";
 import { RepoPicker } from "@/components/profile/repo-picker";
 import { SiteHeader } from "@/components/site-header";
 import { getCurrentUser } from "@/lib/current-user";
+import { ShadowError } from "@/lib/errors";
 import { fetchOwnedRepos, fetchProfile } from "@/lib/github-user";
 import { getUserGithubToken } from "@/lib/user-token";
 
@@ -41,8 +42,15 @@ async function Dashboard() {
   await connection();
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/profile");
-  const token = await getUserGithubToken(user.id);
-  const [profile, owned, docs] = await Promise.all([fetchProfile(token), fetchOwnedRepos(token), documented(user.id)]);
+  let data;
+  try {
+    const token = await getUserGithubToken(user.id);
+    data = await Promise.all([fetchProfile(token), fetchOwnedRepos(token), documented(user.id)]);
+  } catch (e) {
+    if (e instanceof ShadowError && e.code === "UNAUTHENTICATED") redirect("/api/session/expired?next=/profile");
+    throw e;
+  }
+  const [profile, owned, docs] = data;
   return (
     <>
       <SiteHeader user={{ login: profile.login, image: profile.avatarUrl }} />

@@ -32,9 +32,11 @@ export function useJob(onFinish?: (job: JobView) => void) {
         }
       });
       es.addEventListener("error", (ev) => {
-        if ((ev as MessageEvent).data) {
+        // Data means the server rejected the stream; CLOSED means the browser gave up (e.g. non-200). Otherwise it is reconnecting.
+        if ((ev as MessageEvent).data || es.readyState === EventSource.CLOSED) {
           stop();
           setJob(null);
+          finish.current?.({ status: "error", step: "Failed", progress: { done: 0, total: 0 }, repo: initial?.repo ?? "", error: "Lost connection to the job. Please try again." });
         }
       });
     },

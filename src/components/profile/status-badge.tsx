@@ -26,5 +26,6 @@ export function StatusBadge({ status }: { status: RepoStatus | null }) {
   if (!status) return <Badge variant="outline"><Loader2 className="animate-spin" />Checking</Badge>;
   if (status.syncing) return <Badge variant="secondary"><Loader2 className="animate-spin" />Syncing</Badge>;
   if (status.stale) return <Badge variant="secondary">{status.behindBy} commit{status.behindBy === 1 ? "" : "s"} behind</Badge>;
+  if (!status.headSha) return <Badge variant="outline">Status unavailable</Badge>;
   return <Badge variant="outline">Up to date</Badge>;
 }
