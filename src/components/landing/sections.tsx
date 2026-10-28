@@ -1,5 +1,4 @@
 import { GitCommitHorizontal, Lock, MessagesSquare, Network, RefreshCw, Workflow } from "lucide-react";
-import { Walkthrough } from "./walkthrough";
 
 const features = [
   { icon: Network, title: "Diagrams that match the code", body: "Mermaid architecture and sequence diagrams generated from what the modules actually import and call." },
@@ -38,7 +37,16 @@ export function HowItWorks() {
           <h2 className="text-3xl font-semibold tracking-tight">See how Shadow works</h2>
           <p className="mt-3 text-muted-foreground">From a GitHub repository to a source-linked wiki you can explore and ask questions about.</p>
         </div>
-        <Walkthrough />
+        <div className="mx-auto aspect-video w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-2xl shadow-foreground/5">
+          <iframe
+            className="size-full"
+            src="https://www.youtube-nocookie.com/embed/hqqT7hgJaLI"
+            title="Shadow product walkthrough"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
+        </div>
       </div>
     </section>
   );
