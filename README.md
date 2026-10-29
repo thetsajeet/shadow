@@ -26,8 +26,17 @@ bun run dev                  # http://localhost:3000
 | `DATABASE_URL` | Supabase pooled connection string |
 | `DATABASE_URL_DIRECT` | direct connection, used for migrations |
 | `GITHUB_TOKEN` | Octokit token (raises rate limits) |
-| `GOOGLE_API_KEY` | Gemini API key |
+| `MODEL_PROVIDER` / `EMBEDDING_PROVIDER` | `google` (default) or `openai`, configured independently |
+| `GOOGLE_API_KEY` | Gemini API key, required when either provider is Google |
 | `GEMINI_MODEL` / `GEMINI_PLAN_MODEL` / `GEMINI_EMBED_MODEL` | model overrides |
+| `OPENAI_API_KEY` | OpenAI API key when using an OpenAI provider |
+| `OPENAI_MODEL` / `OPENAI_EMBED_MODEL` | OpenAI model overrides |
+| `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Optional server and client error monitoring |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile; required in production for generation and chat |
+| `GENERATION_ENABLED` | Global AI kill switch (`true` by default) |
+| `MAX_GENERATION_TOKENS` / `DAILY_TOKEN_BUDGET` | Per-generation and per-user daily token caps |
+| `RATE_LIMIT_GENERATION_PER_IP` / `RATE_LIMIT_CHAT_PER_IP` / `RATE_LIMIT_WINDOW_SECONDS` | Hashed-IP request limits (default 10 generation and 30 chat requests per hour) |
+| `DATA_RETENTION_DAYS` | Age after which non-current generations and completed jobs are pruned (default 90) |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud keys (not needed with the Dev Server) |
 | `SESSION_SECRET` | better-auth secret (also encrypts stored OAuth tokens) |
 | `BETTER_AUTH_URL` | public base URL of the app (default `http://localhost:3000`) |
@@ -43,10 +52,19 @@ Landing → sign in with GitHub → `/profile` (your GitHub profile, a grid of d
 - **Sync:** the profile compares the branch head with the stored wiki commit (`GET /api/repos/:owner/:name/status`, cached ~2 min) and offers *Sync* when they differ. Sync is manual. It diffs the stored `repo_files.blob_sha` values against the new snapshot once (no per-commit work), rewrites only pages whose source files changed, copies the rest forward with source links re-pinned to the new SHA, and re-plans the outline when more than ~30% of files change or a new top-level directory appears. The old wiki keeps being served until the new one is ready; Ask is disabled while a job runs for that repo.
 - Default branch only; the HEAD SHA pins all source links.
 - Files are filtered (binary, lockfiles, build output, >200KB); repos over 500 files are rejected.
+- Unsafe archive paths and oversized snapshots are rejected, and common API keys, credentials, dotenv values, and private-key files are excluded or redacted before model prompts. Detected repository license information is included in generation context and license/notice files are included in exports.
 - Everything is stored in Postgres. Each run is a *generation*; `repos.current_generation_id` is swapped atomically on success and the last 3 are kept.
 - One active job per repository, plus a per-user hourly limit. An unchanged HEAD SHA reuses the current wiki.
 - Partial failures finish as `done` with `errorCode=PARTIAL`; failed pages can be retried.
 - Progress is streamed to the UI over SSE (job owner only).
+- Owners can delete a wiki and its stored repository artifacts from the profile. A daily retention task removes stale generations, completed jobs, feedback, expired auth records, and old abuse-control counters while preserving each current wiki.
+- `GENERATION_ENABLED=false` pauses generation and AI chat globally. Token usage and estimated provider costs are recorded for generated pages and Q&A.
+
+### Public discovery and export
+Public wikis can be discovered at `/wikis`; individual wiki pages include search, canonical/SEO metadata, and Open Graph images. The sitemap and `robots.txt` expose only public content. Each wiki has a ZIP export and an `llms.txt` endpoint. Private wikis remain owner-only and are excluded from public discovery.
+
+### Quality checks
+Run `bun run lint`, `bun run typecheck`, `bun run test`, `bun run test:e2e`, `bun run db:check`, and `bun run build`. The Playwright suite covers public landing and responsive layout; PGlite integration tests cover wiki persistence, search indexing, access control, and deletion.
 
 ### Q&A
 After the pages are written, code and wiki sections are chunked and embedded (`gemini-embedding-001`, 768 dims, pgvector; vectors are reused for unchanged files by blob SHA). The **Ask** tab (`/wiki/<user>/<repo>/chat`) streams answers from `POST /api/chat`, a Vercel AI SDK tool-calling agent with `search_code` (hybrid vector + full-text, rank-fused), `read_file` and `list_files`. Answers cite exact lines pinned to the commit SHA. Limit: 60 questions per user per hour.

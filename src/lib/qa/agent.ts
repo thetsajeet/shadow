@@ -1,11 +1,13 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import * as Sentry from "@sentry/nextjs";
 import { isStepCount, streamText, tool, type ModelMessage } from "ai";
 import { and, eq, like } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { repoFiles } from "@/db/schema";
 import { env } from "@/env";
+import { repoFiles } from "@/db/schema";
 import { blobUrl } from "../urls";
+import { makeAiSdkChatModel, selectedChatModel } from "../pipeline/models";
+import { estimateCostMicros } from "../security-controls";
 import { hybridSearch } from "./retrieve";
 
 export interface AgentContext {
@@ -75,15 +77,53 @@ export function agentTools(c: AgentContext) {
   };
 }
 
-export function runAgent(c: AgentContext, messages: ModelMessage[], onFinish: (text: string, tokens: number) => void | Promise<void>) {
-  const google = createGoogleGenerativeAI({ apiKey: env().GOOGLE_API_KEY });
-  return streamText({
-    model: google(env().GEMINI_MODEL),
-    instructions: systemPrompt(c),
-    messages,
-    tools: agentTools(c),
-    stopWhen: isStepCount(6),
-    temperature: 0.2,
-    onFinish: (e) => onFinish(e.text, (e.totalUsage?.inputTokens ?? 0) + (e.totalUsage?.outputTokens ?? 0)),
+export function runAgent(c: AgentContext, messages: ModelMessage[], onFinish: (text: string, tokens: number, costMicros: number) => void | Promise<void>) {
+  const model = selectedChatModel("chat");
+  return Sentry.startSpanManual({
+    name: "llm.chat",
+    op: "gen_ai.request",
+    attributes: {
+      "gen_ai.system": env().MODEL_PROVIDER,
+      "gen_ai.request.model": model,
+      "shadow.generation_id": c.generationId,
+    },
+  }, (span, finish) => {
+    let ended = false;
+    const endSpan = () => {
+      if (ended) return;
+      ended = true;
+      finish();
+    };
+    try {
+      return streamText({
+        model: makeAiSdkChatModel(model),
+        instructions: systemPrompt(c),
+        messages,
+        tools: agentTools(c),
+        stopWhen: isStepCount(6),
+        temperature: 0.2,
+        onFinish: async (e) => {
+          const input = e.totalUsage?.inputTokens ?? 0;
+          const output = e.totalUsage?.outputTokens ?? 0;
+          const costMicros = estimateCostMicros(model, input, output);
+          span.setAttribute("gen_ai.usage.input_tokens", input);
+          span.setAttribute("gen_ai.usage.output_tokens", output);
+          span.setAttribute("gen_ai.usage.cost_usd", costMicros / 1_000_000);
+          try {
+            await onFinish(e.text, input + output, costMicros);
+          } finally {
+            endSpan();
+          }
+        },
+        onError: ({ error }) => {
+          Sentry.captureException(error);
+          endSpan();
+        },
+        onAbort: endSpan,
+      });
+    } catch (error) {
+      endSpan();
+      throw error;
+    }
   });
 }

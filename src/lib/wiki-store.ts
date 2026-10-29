@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { generations, pages, repos } from "@/db/schema";
 import { canManage, canView, type Viewer } from "./access";
@@ -20,6 +20,7 @@ export interface WikiMeta {
   generatedAt: string;
   status: "done" | "partial";
   visibility: "public" | "private";
+  license: string | null;
   isOwner: boolean;
   pages: WikiPageMeta[];
 }
@@ -58,9 +59,49 @@ export async function readMeta(user: string, name: string, viewer: Viewer | null
     generatedAt: (gen.finishedAt ?? gen.startedAt).toISOString(),
     status: gen.status,
     visibility: repo.visibility,
+    license: repo.license,
     isOwner: canManage(repo, viewer),
     pages: rows,
   };
+}
+
+export interface PublicWikiSummary {
+  owner: string;
+  name: string;
+  description: string | null;
+  branch: string;
+  sha: string;
+  generatedAt: string;
+  pageCount: number;
+}
+
+export async function listPublicWikis(limit = 50): Promise<PublicWikiSummary[]> {
+  const rows = await db()
+    .select({
+      owner: repos.owner,
+      name: repos.name,
+      description: repos.description,
+      branch: generations.branch,
+      sha: generations.commitSha,
+      generatedAt: generations.finishedAt,
+      pageCount: count(pages.id),
+    })
+    .from(repos)
+    .innerJoin(generations, eq(generations.id, repos.currentGenerationId))
+    .leftJoin(pages, and(eq(pages.generationId, generations.id), eq(pages.status, "done")))
+    .where(and(eq(repos.visibility, "public"), sql`${generations.status} IN ('done', 'partial')`))
+    .groupBy(repos.id, generations.id)
+    .orderBy(desc(generations.finishedAt))
+    .limit(limit);
+  return rows.map((row) => ({
+    owner: row.owner,
+    name: row.name,
+    description: row.description,
+    branch: row.branch,
+    sha: row.sha,
+    generatedAt: (row.generatedAt ?? new Date()).toISOString(),
+    pageCount: row.pageCount,
+  }));
 }
 
 export async function readPage(generationId: string, slug: string): Promise<string | null> {

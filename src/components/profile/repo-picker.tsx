@@ -10,12 +10,14 @@ import { Button } from "@/components/ui/button";
 import type { OwnedRepo } from "@/lib/github-user";
 import { useJob } from "@/lib/use-job";
 import { StatusBadge, useRepoStatus } from "./status-badge";
+import { TurnstileField } from "@/components/turnstile-field";
 
 export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
   const router = useRouter();
   const [selected, setSelected] = useState(repos[0]?.fullName ?? "");
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [challengeToken, setChallengeToken] = useState("");
   const repo = repos.find((r) => r.fullName === selected) ?? null;
   const status = useRepoStatus(repo?.fullName ?? null, refresh);
 
@@ -33,6 +35,7 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
     setBusy(true);
     const res = await fetch(`/api/repos/${repo.fullName}/${kind}`, {
       method: "POST",
+      headers: challengeToken ? { "x-turnstile-token": challengeToken } : undefined,
     }).catch(() => null);
     const data = res ? await res.json().catch(() => ({})) : {};
     if (!res) toast.error("Could not reach the server");
@@ -78,6 +81,7 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
           ))}
         </select>
         <p className="mt-3 text-xs text-muted-foreground">{repos.length} repositories you own. Forks and archived repos are hidden.</p>
+        <TurnstileField onToken={setChallengeToken} />
       </div>
 
       {repo && (
@@ -113,13 +117,13 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
 
           <div className="flex flex-wrap gap-2">
             {!status?.documented ? (
-              <Button onClick={() => start("generate")} disabled={!!running || !status}>Generate docs</Button>
+              <Button onClick={() => start("generate")} disabled={!!running || !status || (!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken)}>Generate docs</Button>
             ) : (
               <>
                 <Link href={wikiPath}>
                   <Button variant={status.stale ? "outline" : "default"}>Open wiki <ArrowRight /></Button>
                 </Link>
-                <Button variant={status.stale ? "default" : "outline"} onClick={() => start("sync")} disabled={!!running}>
+                <Button variant={status.stale ? "default" : "outline"} onClick={() => start("sync")} disabled={!!running || (!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken)}>
                   <RefreshCw />
                   {status.stale ? `Resync (${status.behindBy} new commit${status.behindBy === 1 ? "" : "s"})` : "Resync"}
                 </Button>

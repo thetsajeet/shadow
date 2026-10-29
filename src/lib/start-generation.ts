@@ -10,6 +10,7 @@ import { countRecentJobs, createJob, findActiveJob, updateJob } from "./jobs";
 import { logger } from "./logger";
 import { getUserGithubToken } from "./user-token";
 import { findRepo } from "./wiki-store";
+import { assertGenerationAllowed } from "./security-controls";
 
 const HOUR = 60 * 60_000;
 export const JOBS_PER_USER_PER_HOUR = 10;
@@ -27,6 +28,7 @@ export function assertOwnsRepo(user: CurrentUser, owner: string) {
 }
 
 export async function startGeneration(user: CurrentUser, owner: string, name: string, opts: { sync?: boolean; clientIp: string }): Promise<StartResult> {
+  await assertGenerationAllowed();
   assertOwnsRepo(user, owner);
   const active = await findActiveJob(owner, name);
   if (active) return { kind: "busy", jobId: active.id };

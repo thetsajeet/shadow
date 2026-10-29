@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { env } from "@/env";
 
 export const OutlineSchema = z.object({
   pages: z
@@ -21,12 +20,14 @@ export interface RepoContext {
   name: string;
   sha: string;
   description: string | null;
+  license?: string | null;
   tree: string[];
   readme: string;
   manifests: Record<string, string>;
 }
 
-export const writeModel = () => env().GEMINI_MODEL;
-export const planModel = () => env().GEMINI_PLAN_MODEL ?? env().GEMINI_MODEL;
+import { selectedChatModel } from "./models";
+export const planModel = () => selectedChatModel("plan");
+export const writeModel = () => selectedChatModel("write");
 
 export const PROMPT_VERSION = "v3";

@@ -17,7 +17,6 @@ const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 export const EMBED_DIMS = 768;
 
-
 // ---- better-auth core tables (GitHub SSO only) ----
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -86,6 +85,7 @@ export const repos = pgTable(
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "set null" }),
     visibility: text("visibility", { enum: ["public", "private"] }).notNull().default("public"),
     currentGenerationId: uuid("current_generation_id"),
+    license: text("license"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("repos_owner_name_uq").on(t.owner, t.name)],
@@ -106,6 +106,7 @@ export const generations = pgTable(
     promptVersion: text("prompt_version"),
     tokensIn: integer("tokens_in").notNull().default(0),
     tokensOut: integer("tokens_out").notNull().default(0),
+    costMicros: integer("cost_micros").notNull().default(0),
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -129,8 +130,15 @@ export const pages = pgTable(
     status: text("status", { enum: ["pending", "done", "error"] }).notNull().default("pending"),
     error: text("error"),
     tokens: integer("tokens").notNull().default(0),
+    tsv: tsvector("tsv").generatedAlwaysAs(
+      sql`setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(summary, '')), 'B') || setweight(to_tsvector('english', coalesce(markdown, '')), 'C')`,
+    ),
   },
-  (t) => [uniqueIndex("pages_generation_slug_uq").on(t.generationId, t.slug), index("pages_generation_idx").on(t.generationId)],
+  (t) => [
+    uniqueIndex("pages_generation_slug_uq").on(t.generationId, t.slug),
+    index("pages_generation_idx").on(t.generationId),
+    index("pages_tsv_idx").using("gin", t.tsv),
+  ],
 );
 
 export const repoFiles = pgTable(
@@ -210,6 +218,7 @@ export const messages = pgTable(
     content: text("content").notNull(),
     citations: jsonb("citations").$type<{ path: string; startLine?: number; endLine?: number; url: string }[]>().notNull().default([]),
     tokens: integer("tokens").notNull().default(0),
+    costMicros: integer("cost_micros").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("messages_conversation_idx").on(t.conversationId)],
@@ -222,5 +231,17 @@ export const feedback = pgTable("feedback", {
   userId: text("user_id").notNull(),
   rating: integer("rating").notNull(),
   comment: text("comment"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const rateLimitCounters = pgTable("rate_limit_counters", {
+  key: text("key").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull().default(0),
+});
+
+export const tokenBudgets = pgTable("token_budgets", {
+  key: text("key").primaryKey(),
+  tokensReserved: integer("tokens_reserved").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

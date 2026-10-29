@@ -1,5 +1,5 @@
 import { analyzeRepo, formatAnalysis } from "./analyze";
-import { llmError, makeLlm, withRetry } from "./llm";
+import { llmError, makeLlm, traceLlmCall, withRetry } from "./llm";
 import { OutlineSchema, planModel, type OutlinePage, type RepoContext } from "./types";
 
 const MAX_PROMPT_CHARS = 60_000;
@@ -19,7 +19,7 @@ export function normalizeOutline(raw: OutlinePage[], tree: string[]): OutlinePag
   return out;
 }
 
-export async function planOutline(ctx: RepoContext): Promise<{ outline: OutlinePage[]; tokensIn: number; tokensOut: number }> {
+export async function planOutline(ctx: RepoContext, generationId?: string): Promise<{ outline: OutlinePage[]; tokensIn: number; tokensOut: number }> {
   const manifests = Object.entries(ctx.manifests)
     .map(([f, c]) => `### ${f}\n${c}`)
     .join("\n\n");
@@ -27,6 +27,7 @@ export async function planOutline(ctx: RepoContext): Promise<{ outline: OutlineP
   if (tree.length > 25_000) tree = tree.slice(0, 25_000) + "\n…(truncated)";
   const prompt = `You are planning a wiki-style documentation site for the GitHub repository ${ctx.owner}/${ctx.name}.
 ${ctx.description ? `Description: ${ctx.description}\n` : ""}
+${ctx.license ? `Repository SPDX license: ${ctx.license}. Preserve accurate attribution and do not imply broader reuse permissions.\n` : "Repository license: not identified. Do not make claims about reuse permissions.\n"}
 Produce an outline of 8 to 14 pages for a typical repository, ordered from high level to detailed. Use fewer pages only when the repository is genuinely small or lacks distinct subsystems; do not compress several independent topics into one broad page just to keep the outline short. A page is a navigable wiki section, not a heading within another page.
 
 Cover each topic below when supported by the repository, using separate pages for substantial topics:
@@ -54,8 +55,12 @@ ${manifests || "(none)"}
 ${ctx.readme || "(none)"}`.slice(0, MAX_PROMPT_CHARS);
 
   try {
-    const llm = makeLlm(planModel(), 0.2).withStructuredOutput(OutlineSchema, { includeRaw: true });
-    const res = await withRetry(() => llm.invoke(prompt));
+    const model = planModel();
+    const llm = makeLlm(model, 0.2).withStructuredOutput(OutlineSchema, { includeRaw: true });
+    const res = await withRetry(() => traceLlmCall("plan", model, generationId, () => llm.invoke(prompt), (result) => {
+      const usage = (result.raw as { usage_metadata?: { input_tokens?: number; output_tokens?: number } }).usage_metadata;
+      return { input: usage?.input_tokens ?? 0, output: usage?.output_tokens ?? 0 };
+    }));
     const usage = (res.raw as { usage_metadata?: { input_tokens?: number; output_tokens?: number } }).usage_metadata;
     return {
       outline: normalizeOutline(res.parsed.pages, ctx.tree),

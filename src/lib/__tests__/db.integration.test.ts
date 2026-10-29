@@ -12,7 +12,8 @@ vi.mock("@/db", () => ({ db: () => holder.db, schema: undefined }));
 const { finalizeGeneration } = await import("../generation");
 const { createJob, getJob, findActiveJob, toView } = await import("../jobs");
 const { hybridSearch, toOrQuery } = await import("../qa/retrieve");
-const { readMeta, readPage } = await import("../wiki-store");
+const { listPublicWikis, readMeta, readPage } = await import("../wiki-store");
+const { deleteRepoWiki } = await import("../delete-repo");
 
 let db: ReturnType<typeof drizzle<typeof schema>>;
 
@@ -67,6 +68,16 @@ describe("persistence (pglite)", () => {
     expect((await readMeta("acme", "widgets", null))?.generationId).toBe(before?.generationId);
   });
 
+  it("does not publish a generation after its job was cancelled", async () => {
+    const { repo, gen, job } = await seed(["done"]);
+    const [before] = await db.select({ generationId: schema.repos.currentGenerationId }).from(schema.repos).where(eq(schema.repos.id, repo.id));
+    await db.update(schema.jobs).set({ status: "error", errorCode: "CANCELLED" }).where(eq(schema.jobs.id, job.id));
+    await finalizeGeneration(gen.id, job.id);
+    expect((await getJob(job.id))?.errorCode).toBe("CANCELLED");
+    const [persistedRepo] = await db.select().from(schema.repos).where(eq(schema.repos.id, repo.id));
+    expect(persistedRepo.currentGenerationId).toBe(before.generationId);
+  });
+
   it("prunes old generations", async () => {
     for (let i = 0; i < 4; i++) {
       const { gen, job } = await seed(["done"]);
@@ -83,16 +94,26 @@ describe("persistence (pglite)", () => {
   });
 
   it("hides private wikis from everyone but the owner", async () => {
-    const { repo } = await seed(["done"]);
+    const { repo, gen } = await seed(["done"]);
     await db.update(schema.repos).set({ ownerUserId: "u1", visibility: "private" }).where(eq(schema.repos.id, repo.id));
-    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.repoId, repo.id));
     await db.update(schema.repos).set({ currentGenerationId: gen.id }).where(eq(schema.repos.id, repo.id));
+    await db.update(schema.generations).set({ status: "done", finishedAt: new Date() }).where(eq(schema.generations.id, gen.id));
     expect(await readMeta("acme", "widgets", null)).toBeNull();
     expect(await readMeta("acme", "widgets", { id: "u2" })).toBeNull();
     expect((await readMeta("acme", "widgets", { id: "u1" }))?.isOwner).toBe(true);
     await db.update(schema.repos).set({ visibility: "public" }).where(eq(schema.repos.id, repo.id));
     const pub = await readMeta("acme", "widgets", { id: "u2" });
     expect(pub?.isOwner).toBe(false);
+  });
+
+  it("deletes an owned wiki and leaves queued jobs cancelled", async () => {
+    const { repo, gen, job } = await seed(["done"]);
+    await db.update(schema.repos).set({ ownerUserId: "u1" }).where(eq(schema.repos.id, repo.id));
+    expect(await deleteRepoWiki("u1", "acme", "WIDGETS")).toBe(true);
+    expect((await getJob(job.id))?.errorCode).toBe("CANCELLED");
+    expect(await readMeta("acme", "widgets", { id: "u1" })).toBeNull();
+    expect(await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id))).toHaveLength(0);
+    expect(await deleteRepoWiki("u2", "acme", "widgets")).toBe(false);
   });
 
   it("stores embeddings and full-text vectors", async () => {
@@ -103,6 +124,18 @@ describe("persistence (pglite)", () => {
     expect(nearest.rows[0]).toEqual({ path: "a.ts" });
     const fts = await db.execute(sql`select path from chunks where tsv @@ plainto_tsquery('english', 'hello')`);
     expect(fts.rows).toHaveLength(1);
+  });
+
+  it("indexes wiki pages and lists only public wikis", async () => {
+    const { repo, gen } = await seed(["done"]);
+    await db.update(schema.repos).set({ ownerUserId: "u1", visibility: "public", currentGenerationId: gen.id }).where(eq(schema.repos.id, repo.id));
+    await db.update(schema.generations).set({ status: "done", finishedAt: new Date() }).where(eq(schema.generations.id, gen.id));
+    await db.update(schema.pages).set({ title: "Payment lifecycle", summary: "How refunds are processed", markdown: "# Chargeback handling" }).where(eq(schema.pages.generationId, gen.id));
+    const matches = await db.execute(sql`select slug from pages where generation_id = ${gen.id} and tsv @@ plainto_tsquery('english', 'chargeback')`);
+    expect(matches.rows).toHaveLength(1);
+    expect((await listPublicWikis()).some((wiki) => wiki.owner === "Acme" && wiki.name === "widgets")).toBe(true);
+    await db.update(schema.repos).set({ visibility: "private" }).where(eq(schema.repos.id, repo.id));
+    expect((await listPublicWikis()).some((wiki) => wiki.owner === "Acme" && wiki.name === "widgets")).toBe(false);
   });
 
   it("hybrid search fuses vector and full-text hits", async () => {

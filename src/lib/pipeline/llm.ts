@@ -1,9 +1,38 @@
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { env } from "@/env";
+import * as Sentry from "@sentry/nextjs";
 import { ShadowError } from "../errors";
+import { env } from "@/env";
+import { estimateCostMicros } from "../security-controls";
+import { makeLangChainChatModel } from "./models";
+
+type TokenUsage = { input: number; output: number };
+
+export async function traceLlmCall<T>(
+  task: "plan" | "write",
+  model: string,
+  generationId: string | undefined,
+  invoke: () => Promise<T>,
+  readUsage: (result: T) => TokenUsage,
+): Promise<T> {
+  return Sentry.startSpan({
+    name: `llm.${task}`,
+    op: "gen_ai.request",
+    attributes: {
+      "gen_ai.system": env().MODEL_PROVIDER,
+      "gen_ai.request.model": model,
+      ...(generationId ? { "shadow.generation_id": generationId } : {}),
+    },
+  }, async (span) => {
+    const result = await invoke();
+    const usage = readUsage(result);
+    span.setAttribute("gen_ai.usage.input_tokens", usage.input);
+    span.setAttribute("gen_ai.usage.output_tokens", usage.output);
+    span.setAttribute("gen_ai.usage.cost_usd", estimateCostMicros(model, usage.input, usage.output) / 1_000_000);
+    return result;
+  });
+}
 
 export function makeLlm(model: string, temperature = 0.3) {
-  return new ChatGoogleGenerativeAI({ model, temperature, apiKey: env().GOOGLE_API_KEY, maxRetries: 0 });
+  return makeLangChainChatModel(model, temperature);
 }
 
 function isTransient(e: unknown) {

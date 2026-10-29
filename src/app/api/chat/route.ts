@@ -10,6 +10,8 @@ import { logger } from "@/lib/logger";
 import { runAgent } from "@/lib/qa/agent";
 import { SAFE_SEGMENT } from "@/lib/repo-url";
 import { readMeta } from "@/lib/wiki-store";
+import { assertChatBudget, enforceRequestControls } from "@/lib/security-controls";
+import { errorResponse } from "@/lib/http";
 
 export const maxDuration = 60;
 
@@ -33,6 +35,11 @@ export async function POST(req: Request) {
 
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Sign in to ask questions", code: "UNAUTHENTICATED" }, { status: 401 });
+  try {
+    await enforceRequestControls(req, "chat");
+  } catch (e) {
+    return errorResponse(e, "POST chat admission");
+  }
 
   const meta = await readMeta(owner, repo, user);
   if (!meta) return NextResponse.json({ error: "No wiki found for this repository" }, { status: 404 });
@@ -50,6 +57,11 @@ export async function POST(req: Request) {
 
   const question = lastUserText(uiMessages);
   if (!question.trim()) return NextResponse.json({ error: "Empty message" }, { status: 400 });
+  try {
+    await assertChatBudget(user.id);
+  } catch (e) {
+    return errorResponse(e, "POST chat budget");
+  }
 
   let conversationId = parsed.data.conversationId;
   if (conversationId) {
@@ -70,8 +82,9 @@ export async function POST(req: Request) {
     const result = runAgent(
       { generationId: meta.generationId, owner, name: repo, sha: meta.sha },
       await convertToModelMessages(uiMessages),
-      async (text, tokens) => {
-        await db().insert(messages).values({ conversationId: convId, role: "assistant", content: text, tokens });
+      async (text, tokens, costMicros) => {
+        await db().insert(messages).values({ conversationId: convId, role: "assistant", content: text, tokens, costMicros });
+        logger.info({ userId: user.id, owner, repo, tokens, costMicros }, "chat model usage recorded");
       },
     );
     return createUIMessageStreamResponse({
