@@ -62,7 +62,7 @@ test.describe.serial("public wiki experience", () => {
     await expect(page.getByRole("heading", { name: "Payment and refund flow", exact: true })).toBeVisible();
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", "Explains how a refund is processed.");
 
-    await page.keyboard.press("Control+k");
+    await page.getByRole("button", { name: /Search wiki/ }).click();
     await page.getByRole("combobox", { name: "Search wiki pages" }).fill("refund");
     await expect(page.getByRole("option", { name: /Payment and refund flow/ })).toBeVisible();
     await page.getByRole("option", { name: /Payment and refund flow/ }).click();
