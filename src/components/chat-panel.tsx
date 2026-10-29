@@ -78,6 +78,10 @@ function chatErrorMessage(error: Error): string {
 export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
   const [challengeToken, setChallengeToken] = useState("");
   const setToken = useCallback((token: string) => setChallengeToken(token), []);
+  const resetChallenge = useRef<(() => void) | null>(null);
+  const setChallengeReset = useCallback((reset: (() => void) | null) => {
+    resetChallenge.current = reset;
+  }, []);
   const transport = useMemo(() => {
     const conv: { id?: string } = {};
     return new DefaultChatTransport<UIMessage>({
@@ -85,13 +89,20 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
       fetch: async (input, init) => {
         const headers = new Headers(init?.headers);
         if (challengeToken) headers.set("x-turnstile-token", challengeToken);
-        const res = await fetch(input, { ...init, headers });
-        conv.id = res.headers.get("x-conversation-id") ?? conv.id;
-        return res;
+        try {
+          const res = await fetch(input, { ...init, headers });
+          conv.id = res.headers.get("x-conversation-id") ?? conv.id;
+          return res;
+        } finally {
+          if (challengeToken) {
+            setToken("");
+            resetChallenge.current?.();
+          }
+        }
       },
       prepareSendMessagesRequest: ({ messages }) => ({ body: { owner, repo, messages, conversationId: conv.id } }),
     });
-  }, [challengeToken, owner, repo]);
+  }, [challengeToken, owner, repo, setToken]);
   const { messages, sendMessage, status, stop, error } = useChat({ transport });
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -103,6 +114,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
 
   const submit = (text: string) => {
     if (!text.trim() || busy) return;
+    if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken) return;
     sendMessage({ text });
     setInput("");
   };
@@ -117,7 +129,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
             <p className="mt-1 text-sm text-muted-foreground">Answers are grounded in the code and cite exact lines.</p>
             <div className="mt-6 flex flex-col gap-2">
               {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => submit(s)} className="rounded-lg border px-4 py-2 text-left text-sm transition hover:bg-muted">
+                <button key={s} onClick={() => submit(s)} disabled={!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken} className="rounded-lg border px-4 py-2 text-left text-sm transition hover:bg-muted disabled:opacity-50">
                   {s}
                 </button>
               ))}
@@ -165,12 +177,12 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
             <Square className="size-4" />
           </Button>
         ) : (
-          <Button type="submit" disabled={!input.trim()} aria-label="Send">
+          <Button type="submit" disabled={!input.trim() || (!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken)} aria-label="Send">
             <Send className="size-4" />
           </Button>
         )}
       </form>
-      <TurnstileField onToken={setToken} />
+      <TurnstileField onToken={setToken} onResetReady={setChallengeReset} />
     </div>
   );
 }

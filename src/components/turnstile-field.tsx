@@ -7,13 +7,20 @@ declare global {
     turnstile?: {
       render: (target: HTMLElement, options: { sitekey: string; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void; theme: "auto" }) => string;
       remove: (id: string) => void;
+      reset: (id: string) => void;
     };
   }
 }
 
 const SCRIPT_ID = "cloudflare-turnstile";
 
-export function TurnstileField({ onToken }: { onToken: (token: string) => void }) {
+export function TurnstileField({
+  onToken,
+  onResetReady,
+}: {
+  onToken: (token: string) => void;
+  onResetReady?: (reset: (() => void) | null) => void;
+}) {
   const target = useRef<HTMLDivElement>(null);
   const widget = useRef<string | null>(null);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
@@ -30,6 +37,9 @@ export function TurnstileField({ onToken }: { onToken: (token: string) => void }
         callback: onToken,
         "expired-callback": () => onToken(""),
         "error-callback": () => onToken(""),
+      });
+      onResetReady?.(() => {
+        if (widget.current) window.turnstile?.reset(widget.current);
       });
     };
     if (window.turnstile) render();
@@ -48,14 +58,16 @@ export function TurnstileField({ onToken }: { onToken: (token: string) => void }
         script?.removeEventListener("load", render);
         if (widget.current) window.turnstile?.remove(widget.current);
         widget.current = null;
+        onResetReady?.(null);
       };
     }
     return () => {
       active = false;
       if (widget.current) window.turnstile?.remove(widget.current);
       widget.current = null;
+      onResetReady?.(null);
     };
-  }, [siteKey, onToken]);
+  }, [siteKey, onToken, onResetReady]);
 
   if (!siteKey) return null;
   return <div ref={target} className="min-h-16" aria-label="Human verification" />;

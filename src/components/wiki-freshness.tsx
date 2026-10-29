@@ -2,7 +2,7 @@
 
 import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { TurnstileField } from "@/components/turnstile-field";
@@ -15,6 +15,10 @@ export function WikiFreshness({ owner, repo, isOwner }: { owner: string; repo: s
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [challengeOpen, setChallengeOpen] = useState(false);
+  const resetChallenge = useRef<(() => void) | null>(null);
+  const setChallengeReset = useCallback((reset: (() => void) | null) => {
+    resetChallenge.current = reset;
+  }, []);
   const router = useRouter();
   const status = useRepoStatus(`${owner}/${repo}`, refresh);
   const { watch } = useJob((job) => {
@@ -51,6 +55,10 @@ export function WikiFreshness({ owner, repo, isOwner }: { owner: string; repo: s
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not sync this wiki.");
       setBusy(false);
+    } finally {
+      setToken("");
+      resetChallenge.current?.();
+      setChallengeOpen(false);
     }
   }
 
@@ -69,7 +77,7 @@ export function WikiFreshness({ owner, repo, isOwner }: { owner: string; repo: s
           <div role="dialog" aria-modal="true" aria-label="Verify before syncing" className="w-full max-w-sm rounded-xl border bg-card p-5 shadow-xl">
             <h2 className="font-medium">Verify before syncing</h2>
             <p className="mt-1 text-sm text-muted-foreground">Complete the challenge to protect the service from automated requests.</p>
-            <TurnstileField onToken={setToken} />
+            <TurnstileField onToken={setToken} onResetReady={setChallengeReset} />
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setChallengeOpen(false)}>Cancel</Button>
               <Button disabled={!token} onClick={sync}>Continue</Button>

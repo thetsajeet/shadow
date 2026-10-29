@@ -4,6 +4,7 @@ import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "../../src/db/schema";
+import { pruneRetainedRepositoryData } from "../../src/lib/retention";
 
 const owner = `e2e-${Date.now()}`;
 const repo = "public-wiki";
@@ -57,12 +58,34 @@ test.describe.serial("public wiki experience", () => {
     await client.end();
   });
 
+  test("retention prunes an expired generation using postgres-js date parameters", async () => {
+    const cleanupOwner = `${owner}-retention`;
+    const [record] = await database.insert(schema.repos).values({
+      owner: cleanupOwner,
+      name: repo,
+      defaultBranch: "main",
+      visibility: "public",
+    }).returning();
+    const [generation] = await database.insert(schema.generations).values({
+      repoId: record.id,
+      commitSha: "expired-generation",
+      branch: "main",
+      startedAt: new Date(Date.now() - 10_000),
+    }).returning();
+
+    await pruneRetainedRepositoryData(new Date());
+
+    expect(await database.select().from(schema.generations).where(eq(schema.generations.id, generation.id))).toHaveLength(0);
+    await database.delete(schema.repos).where(eq(schema.repos.id, record.id));
+  });
+
   test("search, metadata, discovery text, and export work end to end", async ({ page }) => {
     await page.goto(`/wiki/${owner}/${repo}`);
     await expect(page.getByRole("heading", { name: "Payment and refund flow", exact: true })).toBeVisible();
     await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", "Explains how a refund is processed.");
 
-    await page.getByRole("button", { name: /Search wiki/ }).click();
+    await expect(page.getByRole("button", { name: /Search wiki/ })).toHaveAttribute("data-shortcuts-ready", "true");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
     await page.getByRole("combobox", { name: "Search wiki pages" }).fill("refund");
     await expect(page.getByRole("option", { name: /Payment and refund flow/ })).toBeVisible();
     await page.getByRole("option", { name: /Payment and refund flow/ }).click();

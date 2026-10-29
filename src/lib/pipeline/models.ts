@@ -10,8 +10,9 @@ type EmbeddingSettings = Pick<Env, "EMBEDDING_PROVIDER" | "GEMINI_EMBED_MODEL" |
 
 export function chooseChatModel(config: ModelSettings, role: "plan" | "write" | "chat"): string {
   const providerDefault = config.MODEL_PROVIDER === "google" ? config.GEMINI_MODEL : config.OPENAI_MODEL;
+  const providerPlan = config.MODEL_PROVIDER === "google" ? config.GEMINI_PLAN_MODEL : undefined;
   return role === "plan"
-    ? config.PLAN_MODEL_NAME ?? config.GEMINI_PLAN_MODEL ?? config.MODEL_NAME ?? providerDefault
+    ? config.PLAN_MODEL_NAME ?? providerPlan ?? config.MODEL_NAME ?? providerDefault
     : config.MODEL_NAME ?? providerDefault;
 }
 

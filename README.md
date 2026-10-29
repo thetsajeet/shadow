@@ -35,7 +35,7 @@ bun run dev                  # http://localhost:3000
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile; required in production for generation and chat |
 | `GENERATION_ENABLED` | Global AI kill switch (`true` by default) |
 | `MAX_GENERATION_TOKENS` / `DAILY_TOKEN_BUDGET` | Per-generation and per-user daily token caps |
-| `RATE_LIMIT_GENERATION_PER_IP` / `RATE_LIMIT_CHAT_PER_IP` / `RATE_LIMIT_WINDOW_SECONDS` | Hashed-IP request limits (default 10 generation and 30 chat requests per hour) |
+| `RATE_LIMIT_GENERATION_PER_IP` / `RATE_LIMIT_CHAT_PER_IP` / `RATE_LIMIT_WINDOW_SECONDS` | Hashed-IP request limits (default 10 generation and 30 chat requests per hour); the deployment proxy must overwrite `x-real-ip` |
 | `DATA_RETENTION_DAYS` | Age after which non-current generations and completed jobs are pruned (default 90) |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | Inngest Cloud keys (not needed with the Dev Server) |
 | `SESSION_SECRET` | better-auth secret (also encrypts stored OAuth tokens) |
@@ -58,6 +58,7 @@ Landing → sign in with GitHub → `/profile` (your GitHub profile, a grid of d
 - Partial failures finish as `done` with `errorCode=PARTIAL`; failed pages can be retried.
 - Progress is streamed to the UI over SSE (job owner only).
 - Owners can delete a wiki and its stored repository artifacts from the profile. A daily retention task removes stale generations, completed jobs, feedback, expired auth records, and old abuse-control counters while preserving each current wiki.
+- Token budgets reserve an estimate for each model operation and reconcile it to reported usage after success; failed operations release their reservation. `MAX_GENERATION_TOKENS` defaults to 500,000 to cover a 14-page generation plus indexing estimates.
 - `GENERATION_ENABLED=false` pauses generation and AI chat globally. Token usage and estimated provider costs are recorded for generated pages and Q&A.
 
 ### Public discovery and export

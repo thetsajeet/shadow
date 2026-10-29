@@ -77,7 +77,12 @@ export function agentTools(c: AgentContext) {
   };
 }
 
-export function runAgent(c: AgentContext, messages: ModelMessage[], onFinish: (text: string, tokens: number, costMicros: number) => void | Promise<void>) {
+export function runAgent(
+  c: AgentContext,
+  messages: ModelMessage[],
+  onFinish: (text: string, tokens: number, costMicros: number) => void | Promise<void>,
+  onFailure: () => void | Promise<void> = () => {},
+) {
   const model = selectedChatModel("chat");
   return Sentry.startSpanManual({
     name: "llm.chat",
@@ -89,10 +94,16 @@ export function runAgent(c: AgentContext, messages: ModelMessage[], onFinish: (t
     },
   }, (span, finish) => {
     let ended = false;
+    let terminalHandled = false;
     const endSpan = () => {
       if (ended) return;
       ended = true;
       finish();
+    };
+    const claimTerminal = () => {
+      if (terminalHandled) return false;
+      terminalHandled = true;
+      return true;
     };
     try {
       return streamText({
@@ -103,6 +114,7 @@ export function runAgent(c: AgentContext, messages: ModelMessage[], onFinish: (t
         stopWhen: isStepCount(6),
         temperature: 0.2,
         onFinish: async (e) => {
+          if (!claimTerminal()) return;
           const input = e.totalUsage?.inputTokens ?? 0;
           const output = e.totalUsage?.outputTokens ?? 0;
           const costMicros = estimateCostMicros(model, input, output);
@@ -111,15 +123,34 @@ export function runAgent(c: AgentContext, messages: ModelMessage[], onFinish: (t
           span.setAttribute("gen_ai.usage.cost_usd", costMicros / 1_000_000);
           try {
             await onFinish(e.text, input + output, costMicros);
+          } catch (error) {
+            try {
+              await onFailure();
+            } catch (releaseError) {
+              Sentry.captureException(releaseError);
+            }
+            throw error;
           } finally {
             endSpan();
           }
         },
-        onError: ({ error }) => {
+        onError: async ({ error }) => {
           Sentry.captureException(error);
-          endSpan();
+          if (!claimTerminal()) return;
+          try {
+            await onFailure();
+          } finally {
+            endSpan();
+          }
         },
-        onAbort: endSpan,
+        onAbort: async () => {
+          if (!claimTerminal()) return;
+          try {
+            await onFailure();
+          } finally {
+            endSpan();
+          }
+        },
       });
     } catch (error) {
       endSpan();

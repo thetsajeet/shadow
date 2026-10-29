@@ -2,7 +2,7 @@
 import { ArrowRight, GitCommit, Lock, RefreshCw, Star } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { JobStatus, type JobView } from "@/components/job-status";
 import { Badge } from "@/components/ui/badge";
@@ -18,11 +18,14 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
   const [challengeToken, setChallengeToken] = useState("");
+  const resetChallenge = useRef<(() => void) | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const repo = repos.find((r) => r.fullName === selected) ?? null;
   const status = useRepoStatus(repo?.fullName ?? null, refresh);
 
   const { job, watch, reset } = useJob((j) => {
     setBusy(false);
+    if (j.errorCode !== "PARTIAL") setActiveJobId(null);
     setRefresh((n) => n + 1);
     router.refresh();
     if (j.status === "error") toast.error(j.error ?? "Generation failed");
@@ -30,28 +33,65 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
     else toast.success(`Docs ready for ${j.repo}`);
   });
 
+  const setChallengeReset = useCallback((reset: (() => void) | null) => {
+    resetChallenge.current = reset;
+  }, []);
+
+  function clearChallenge() {
+    setChallengeToken("");
+    resetChallenge.current?.();
+  }
+
   async function start(kind: "generate" | "sync") {
     if (!repo) return;
     setBusy(true);
-    const res = await fetch(`/api/repos/${repo.fullName}/${kind}`, {
-      method: "POST",
-      headers: challengeToken ? { "x-turnstile-token": challengeToken } : undefined,
-    }).catch(() => null);
-    const data = res ? await res.json().catch(() => ({})) : {};
-    if (!res) toast.error("Could not reach the server");
-    else if (res.status === 409) {
-      toast.warning(`Busy, currently processing ${data.currentRepo}`);
-      if (data.jobId) return watch(data.jobId);
-    } else if (!res.ok) toast.error(data.error ?? "Request failed");
-    else if (data.reused || data.upToDate) {
-      toast.success("Codebase already in sync");
-      setRefresh((n) => n + 1);
-    } else {
-      toast.success(kind === "sync" ? "Sync started in the background" : "Submitted, generating docs in the background");
-      const initial: JobView = { status: "queued", step: "Queued", progress: { done: 0, total: 0 }, repo: repo.fullName };
-      return watch(data.jobId, initial);
+    try {
+      const res = await fetch(`/api/repos/${repo.fullName}/${kind}`, {
+        method: "POST",
+        headers: challengeToken ? { "x-turnstile-token": challengeToken } : undefined,
+      }).catch(() => null);
+      const data = res ? await res.json().catch(() => ({})) : {};
+      if (!res) toast.error("Could not reach the server");
+      else if (res.status === 409) {
+        toast.warning(`Busy, currently processing ${data.currentRepo}`);
+        if (data.jobId) {
+          setActiveJobId(data.jobId);
+          return watch(data.jobId);
+        }
+      } else if (!res.ok) toast.error(data.error ?? "Request failed");
+      else if (data.reused || data.upToDate) {
+        toast.success("Codebase already in sync");
+        setRefresh((n) => n + 1);
+      } else {
+        setActiveJobId(data.jobId);
+        toast.success(kind === "sync" ? "Sync started in the background" : "Submitted, generating docs in the background");
+        const initial: JobView = { status: "queued", step: "Queued", progress: { done: 0, total: 0 }, repo: repo.fullName };
+        return watch(data.jobId, initial);
+      }
+      setBusy(false);
+    } finally {
+      clearChallenge();
     }
-    setBusy(false);
+  }
+
+  async function retry() {
+    if (!activeJobId) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/jobs/${activeJobId}/retry`, {
+        method: "POST",
+        headers: challengeToken ? { "x-turnstile-token": challengeToken } : undefined,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not retry failed pages.");
+      const initial: JobView = { status: "queued", step: "Queued for retry", progress: { done: 0, total: 0 }, repo: repo?.fullName ?? "" };
+      watch(data.jobId, initial);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not retry failed pages.");
+      setBusy(false);
+    } finally {
+      clearChallenge();
+    }
   }
 
   if (repos.length === 0) return <p className="text-sm text-muted-foreground">No repositories found on your account.</p>;
@@ -81,7 +121,7 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
           ))}
         </select>
         <p className="mt-3 text-xs text-muted-foreground">{repos.length} repositories you own. Forks and archived repos are hidden.</p>
-        <TurnstileField onToken={setChallengeToken} />
+        <TurnstileField onToken={setChallengeToken} onResetReady={setChallengeReset} />
       </div>
 
       {repo && (
@@ -130,7 +170,7 @@ export function RepoPicker({ repos }: { repos: OwnedRepo[] }) {
               </>
             )}
           </div>
-          {job && <JobStatus job={job} onRetry={undefined} />}
+          {job && <JobStatus job={job} onRetry={job.errorCode === "PARTIAL" ? retry : undefined} />}
         </div>
       )}
     </div>

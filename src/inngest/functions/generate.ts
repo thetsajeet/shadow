@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { feedback, generations, jobs, pages, rateLimitCounters, repoFiles, repos, session, tokenBudgets, verification } from "@/db/schema";
+import { generations, jobs, pages, rateLimitCounters, repoFiles, repos, session, tokenBudgets, verification } from "@/db/schema";
 import { decodeError, guard } from "@/lib/errors-codec";
 import { addTokens, finalizeGeneration, loadContext } from "@/lib/generation";
 import { getJob, updateJob } from "@/lib/jobs";
@@ -12,8 +12,9 @@ import { planOutline } from "@/lib/pipeline/plan";
 import { PROMPT_VERSION, planModel, writeModel } from "@/lib/pipeline/types";
 import { fetchSnapshot } from "@/lib/snapshot";
 import { canReuseOutline, diffFiles, planReuse, repinLinks, shouldReplan } from "@/lib/sync-diff";
-import { assertGenerationAllowed, assertTokenBudget } from "@/lib/security-controls";
+import { assertGenerationAllowed, assertTokenBudget, releaseTokenBudget, settleTokenBudget } from "@/lib/security-controls";
 import { env } from "@/env";
+import { pruneRetainedRepositoryData } from "@/lib/retention";
 import * as Sentry from "@sentry/nextjs";
 import { inngest } from "../client";
 import { generateRequested, retryRequested } from "../events";
@@ -159,8 +160,16 @@ export const generateWiki = inngest.createFunction(
           const reused = baseGenerationId ? await carryForward(genId, baseGenerationId, jobId) : null;
           if (reused) return { ...reused, cancelled: false };
           const ctx = await loadContext(genId);
-          await assertTokenBudget(genId);
-          const { outline, tokensIn, tokensOut } = await planOutline(ctx, genId);
+          const reservation = await assertTokenBudget(genId, "plan");
+          let planned: Awaited<ReturnType<typeof planOutline>>;
+          try {
+            planned = await planOutline(ctx, genId);
+          } catch (error) {
+            await releaseTokenBudget(reservation);
+            throw error;
+          }
+          const { outline, tokensIn, tokensOut } = planned;
+          await settleTokenBudget(reservation, tokensIn + tokensOut);
           await db().delete(pages).where(eq(pages.generationId, genId));
           await db()
             .insert(pages)
@@ -284,13 +293,7 @@ export const cleanupRetainedData = inngest.createFunction(
     const days = env().DATA_RETENTION_DAYS;
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     return step.run("prune-expired-data", async () => {
-      await db().execute(sql`
-        DELETE FROM generations g
-        WHERE g.started_at < ${cutoff}
-          AND NOT EXISTS (SELECT 1 FROM repos r WHERE r.current_generation_id = g.id)
-      `);
-      await db().delete(jobs).where(sql`${jobs.createdAt} < ${cutoff} AND ${jobs.status} IN ('done', 'error')`);
-      await db().delete(feedback).where(sql`${feedback.createdAt} < ${cutoff}`);
+      await pruneRetainedRepositoryData(cutoff);
       await db().delete(session).where(sql`${session.expiresAt} < now()`);
       await db().delete(verification).where(sql`${verification.expiresAt} < now()`);
       await db().delete(rateLimitCounters).where(sql`${rateLimitCounters.windowStart} < now() - interval '2 days'`);

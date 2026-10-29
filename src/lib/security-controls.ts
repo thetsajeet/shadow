@@ -1,18 +1,12 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { generations, rateLimitCounters, repos, tokenBudgets } from "@/db/schema";
 import { env } from "@/env";
+import { getTrustedClientIp } from "./client-ip";
 import { ShadowError } from "./errors";
 
 type RequestLimit = "generate" | "chat";
-
-function clientIp(headers: Headers): string {
-  return headers.get("cf-connecting-ip")?.trim()
-    || headers.get("x-real-ip")?.trim()
-    || headers.get("x-forwarded-for")?.split(",").at(-1)?.trim()
-    || "unknown";
-}
 
 export function turnstileEnabled(): boolean {
   return Boolean(env().NEXT_PUBLIC_TURNSTILE_SITE_KEY && env().TURNSTILE_SECRET_KEY);
@@ -20,6 +14,7 @@ export function turnstileEnabled(): boolean {
 
 export async function enforceRequestControls(req: Request, kind: RequestLimit): Promise<void> {
   const config = env();
+  const ip = getTrustedClientIp(req.headers);
   if (!turnstileEnabled()) {
     if (process.env.NODE_ENV === "production") {
       throw new ShadowError("INTERNAL", "Anti-bot protection is not configured.");
@@ -33,7 +28,7 @@ export async function enforceRequestControls(req: Request, kind: RequestLimit): 
       body: new URLSearchParams({
         secret: config.TURNSTILE_SECRET_KEY!,
         response: token,
-        remoteip: clientIp(req.headers),
+        ...(ip !== "unknown" ? { remoteip: ip } : {}),
       }),
       signal: AbortSignal.timeout(5_000),
     });
@@ -42,7 +37,7 @@ export async function enforceRequestControls(req: Request, kind: RequestLimit): 
     if (!result.success) throw new ShadowError("FORBIDDEN", "Verification failed. Please try again.");
   }
 
-  const ipKey = createHmac("sha256", config.SESSION_SECRET).update(clientIp(req.headers)).digest("hex");
+  const ipKey = createHmac("sha256", config.SESSION_SECRET).update(ip).digest("hex");
   const key = `${kind}:${ipKey}`;
   const now = new Date();
   const windowMs = config.RATE_LIMIT_WINDOW_SECONDS * 1000;
@@ -70,7 +65,12 @@ export async function assertGenerationAllowed(): Promise<void> {
   }
 }
 
-export async function assertTokenBudget(generationId: string, estimatedTokens = 20_000): Promise<void> {
+export interface TokenReservation {
+  key: string;
+  counters: { key: string; limit: number }[];
+}
+
+export async function assertTokenBudget(generationId: string, operation: string, estimatedTokens = 20_000): Promise<TokenReservation> {
   await assertGenerationAllowed();
   const config = env();
   const [gen] = await db()
@@ -81,24 +81,72 @@ export async function assertTokenBudget(generationId: string, estimatedTokens = 
   if (!gen) throw new ShadowError("INTERNAL", "Generation budget could not be checked.");
   if (!gen.userId) throw new ShadowError("UNAUTHENTICATED", "Repository owner is no longer available.");
   const userId = gen.userId;
-  await db().transaction(async (tx) => {
-    await reserveTokens(tx, `generation:${generationId}`, estimatedTokens, config.MAX_GENERATION_TOKENS);
-    await reserveTokens(tx, dailyBudgetKey(userId), estimatedTokens, config.DAILY_TOKEN_BUDGET);
-  });
+  const day = new Date().toISOString().slice(0, 10);
+  const reservation = {
+    key: `reservation:generation:${generationId}:${encodeURIComponent(operation)}:${day}`,
+    counters: [
+      { key: `generation:${generationId}`, limit: config.MAX_GENERATION_TOKENS },
+      { key: dailyBudgetKey(userId, day), limit: config.DAILY_TOKEN_BUDGET },
+    ],
+  };
+  await reserveOperation(reservation, estimatedTokens);
+  return reservation;
 }
 
-export async function assertChatBudget(userId: string, estimatedTokens = 8_000): Promise<void> {
+export async function assertChatBudget(userId: string, estimatedTokens = 8_000): Promise<TokenReservation> {
   if (env().GENERATION_ENABLED !== "true") {
     throw new ShadowError("RATE_LIMITED", "AI features are temporarily paused.", true);
   }
-  await db().transaction((tx) => reserveTokens(tx, dailyBudgetKey(userId), estimatedTokens, env().DAILY_TOKEN_BUDGET));
+  const day = new Date().toISOString().slice(0, 10);
+  const reservation = {
+    key: `reservation:chat:${userId}:${randomUUID()}:${day}`,
+    counters: [{ key: dailyBudgetKey(userId, day), limit: env().DAILY_TOKEN_BUDGET }],
+  };
+  await reserveOperation(reservation, estimatedTokens);
+  return reservation;
 }
 
-function dailyBudgetKey(userId: string): string {
-  return `daily:${userId}:${new Date().toISOString().slice(0, 10)}`;
+export async function settleTokenBudget(reservation: TokenReservation, actualTokens: number): Promise<void> {
+  if (!Number.isSafeInteger(actualTokens) || actualTokens < 0) throw new Error("Actual token usage must be a non-negative integer.");
+  await db().transaction(async (tx) => {
+    const [row] = await tx.select({ tokensReserved: tokenBudgets.tokensReserved }).from(tokenBudgets)
+      .where(eq(tokenBudgets.key, reservation.key)).for("update");
+    if (!row) throw new ShadowError("INTERNAL", "Token reservation could not be reconciled.");
+    const delta = actualTokens - row.tokensReserved;
+    for (const counter of reservation.counters) await adjustReservedTokens(tx, counter.key, delta);
+    await tx.update(tokenBudgets).set({ tokensReserved: actualTokens }).where(eq(tokenBudgets.key, reservation.key));
+  });
+}
+
+export async function releaseTokenBudget(reservation: TokenReservation): Promise<void> {
+  await db().transaction(async (tx) => {
+    const [row] = await tx.select({ tokensReserved: tokenBudgets.tokensReserved }).from(tokenBudgets)
+      .where(eq(tokenBudgets.key, reservation.key)).for("update");
+    if (!row) return;
+    await tx.delete(tokenBudgets).where(eq(tokenBudgets.key, reservation.key));
+    for (const counter of reservation.counters) await adjustReservedTokens(tx, counter.key, -row.tokensReserved);
+  });
+}
+
+function dailyBudgetKey(userId: string, day: string): string {
+  return `daily:${userId}:${day}`;
+}
+
+async function reserveOperation(reservation: TokenReservation, amount: number): Promise<void> {
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error("Token estimate must be a non-negative integer.");
+  if (reservation.counters.some((counter) => amount > counter.limit)) {
+    throw new ShadowError("RATE_LIMITED", "Your AI token budget has been reached.", true);
+  }
+  await db().transaction(async (tx) => {
+    const [inserted] = await tx.insert(tokenBudgets).values({ key: reservation.key, tokensReserved: amount })
+      .onConflictDoNothing().returning({ key: tokenBudgets.key });
+    if (!inserted) return;
+    for (const counter of reservation.counters) await reserveTokens(tx, counter.key, amount, counter.limit);
+  });
 }
 
 async function reserveTokens(tx: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0], key: string, amount: number, limit: number) {
+  if (amount > limit) throw new ShadowError("RATE_LIMITED", "Your AI token budget has been reached.", true);
   const [reserved] = await tx
     .insert(tokenBudgets)
     .values({ key, tokensReserved: amount })
@@ -109,6 +157,19 @@ async function reserveTokens(tx: Parameters<Parameters<ReturnType<typeof db>["tr
     })
     .returning({ key: tokenBudgets.key });
   if (!reserved) throw new ShadowError("RATE_LIMITED", "Your AI token budget has been reached.", true);
+}
+
+async function adjustReservedTokens(
+  tx: Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0],
+  key: string,
+  delta: number,
+): Promise<void> {
+  if (delta === 0) return;
+  const [updated] = await tx.update(tokenBudgets)
+    .set({ tokensReserved: sql`${tokenBudgets.tokensReserved} + ${delta}` })
+    .where(sql`${tokenBudgets.key} = ${key} AND ${tokenBudgets.tokensReserved} + ${delta} >= 0`)
+    .returning({ key: tokenBudgets.key });
+  if (!updated) throw new ShadowError("INTERNAL", "Token budget counter could not be reconciled.");
 }
 
 export function estimateCostMicros(model: string, tokensIn: number, tokensOut: number): number {

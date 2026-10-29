@@ -1,19 +1,24 @@
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as schema from "@/db/schema";
 
-const holder = vi.hoisted(() => ({ db: undefined as unknown }));
+const holder = vi.hoisted(() => ({
+  db: undefined as unknown,
+  env: { GENERATION_ENABLED: "true", MAX_GENERATION_TOKENS: 250_000, DAILY_TOKEN_BUDGET: 1_000_000 },
+}));
 vi.mock("@/db", () => ({ db: () => holder.db, schema: undefined }));
+vi.mock("@/env", () => ({ env: () => holder.env }));
 
 const { finalizeGeneration } = await import("../generation");
 const { createJob, getJob, findActiveJob, toView } = await import("../jobs");
 const { hybridSearch, toOrQuery } = await import("../qa/retrieve");
 const { listPublicWikis, readMeta, readPage } = await import("../wiki-store");
 const { deleteRepoWiki } = await import("../delete-repo");
+const { assertTokenBudget, releaseTokenBudget, settleTokenBudget } = await import("../security-controls");
 
 let db: ReturnType<typeof drizzle<typeof schema>>;
 
@@ -109,11 +114,33 @@ describe("persistence (pglite)", () => {
   it("deletes an owned wiki and leaves queued jobs cancelled", async () => {
     const { repo, gen, job } = await seed(["done"]);
     await db.update(schema.repos).set({ ownerUserId: "u1" }).where(eq(schema.repos.id, repo.id));
+    const history = await createJob({ owner: "Acme", name: "widgets", userId: "u1", clientIp: "1.1.1.1", status: "done", repoId: repo.id, generationId: gen.id });
     expect(await deleteRepoWiki("u1", "acme", "WIDGETS")).toBe(true);
     expect((await getJob(job.id))?.errorCode).toBe("CANCELLED");
+    expect(await getJob(history.id)).toMatchObject({ status: "done", repoId: null, generationId: null });
     expect(await readMeta("acme", "widgets", { id: "u1" })).toBeNull();
     expect(await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id))).toHaveLength(0);
     expect(await deleteRepoWiki("u2", "acme", "widgets")).toBe(false);
+  });
+
+  it("reconciles idempotent token reservations to actual model usage", async () => {
+    const { repo, gen } = await seed(["done"]);
+    await db.update(schema.repos).set({ ownerUserId: "u1" }).where(eq(schema.repos.id, repo.id));
+    const reservation = await assertTokenBudget(gen.id, "write:p0", 20_000);
+    await assertTokenBudget(gen.id, "write:p0", 20_000);
+    await settleTokenBudget(reservation, 321);
+
+    const budgetKeys = [`generation:${gen.id}`, `daily:u1:${new Date().toISOString().slice(0, 10)}`, reservation.key];
+    const rows = await db.select({ key: schema.tokenBudgets.key, tokensReserved: schema.tokenBudgets.tokensReserved })
+      .from(schema.tokenBudgets).where(inArray(schema.tokenBudgets.key, budgetKeys));
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => row.tokensReserved === 321)).toBe(true);
+
+    const released = await assertTokenBudget(gen.id, "write:p1", 10_000);
+    await releaseTokenBudget(released);
+    const [generationBudget] = await db.select({ tokensReserved: schema.tokenBudgets.tokensReserved })
+      .from(schema.tokenBudgets).where(eq(schema.tokenBudgets.key, `generation:${gen.id}`));
+    expect(generationBudget.tokensReserved).toBe(321);
   });
 
   it("stores embeddings and full-text vectors", async () => {

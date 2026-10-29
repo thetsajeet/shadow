@@ -1,6 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const port = 3100;
+process.env.DATABASE_URL ??= "postgres://postgres:postgres@127.0.0.1:5432/shadow";
+process.env.DATABASE_URL_DIRECT ??= process.env.DATABASE_URL;
+process.env.GITHUB_TOKEN ??= "test-github-token";
+process.env.SESSION_SECRET ??= "e2e-session-secret-for-playwright";
+process.env.GITHUB_CLIENT_ID ??= "test-client-id";
+process.env.GITHUB_CLIENT_SECRET ??= "test-client-secret";
+process.env.GOOGLE_API_KEY ??= "test-google-key";
+process.env.MODEL_PROVIDER = "google";
+process.env.EMBEDDING_PROVIDER = "google";
 
 export default defineConfig({
   testDir: "./tests/e2e",

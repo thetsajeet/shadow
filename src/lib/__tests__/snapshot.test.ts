@@ -23,4 +23,9 @@ describe("snapshot helpers", () => {
     expect(redactSecrets("DATABASE_URL=postgres://secret\nDEBUG=true", ".env")).toBe("DATABASE_URL=[REDACTED]\nDEBUG=[REDACTED]");
     expect(redactSecrets("API_KEY=replace-me", ".env.example")).toBe("API_KEY=replace-me");
   });
+  it("does not redact unquoted identifiers or type annotations", () => {
+    const source = "password: string; apiKey: config.GOOGLE_API_KEY!; secret: z.string()";
+    expect(redactSecrets(source, "config.ts")).toBe(source);
+    expect(redactSecrets('{"apiKey":"actual-secret"}', "config.json")).toBe('{"apiKey":"[REDACTED]"}');
+  });
 });

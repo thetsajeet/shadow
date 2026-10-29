@@ -29,6 +29,7 @@ export function WikiSearch({ owner, repo }: { owner: string; repo: string }) {
   }, []);
 
   useEffect(() => {
+    const trigger = triggerRef.current;
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -37,7 +38,11 @@ export function WikiSearch({ owner, repo }: { owner: string; repo: string }) {
       } else if (event.key === "Escape" && open) close();
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    trigger?.setAttribute("data-shortcuts-ready", "true");
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      trigger?.removeAttribute("data-shortcuts-ready");
+    };
   }, [close, open]);
 
   useEffect(() => {

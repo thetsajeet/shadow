@@ -6,7 +6,7 @@ import { guard } from "@/lib/errors-codec";
 import { getJob, incrementJobDone } from "@/lib/jobs";
 import { logger } from "@/lib/logger";
 import { writePage } from "@/lib/pipeline/write";
-import { assertGenerationAllowed, assertTokenBudget } from "@/lib/security-controls";
+import { assertGenerationAllowed, assertTokenBudget, releaseTokenBudget, settleTokenBudget } from "@/lib/security-controls";
 import { writeModel } from "@/lib/pipeline/types";
 import { inngest } from "../client";
 import { pageInput } from "../events";
@@ -26,19 +26,26 @@ export const writeWikiPage = inngest.createFunction(
         const job = await getJob(jobId);
         if (job?.status !== "queued" && job?.status !== "running") return { cancelled: true };
         await assertGenerationAllowed();
-        await assertTokenBudget(generationId);
         const [row] = await db().select().from(pages).where(and(eq(pages.generationId, generationId), eq(pages.slug, slug)));
         if (!row) throw new Error(`Page ${slug} not found`);
         const ctx = await loadContext(generationId);
         const outline = await db().select({ slug: pages.slug, title: pages.title }).from(pages).where(eq(pages.generationId, generationId));
         const files = await loadFiles(generationId, row.sourceFiles);
-        const res = await writePage({
-          generationId,
-          ctx,
-          page: { slug, title: row.title, summary: row.summary, files: row.sourceFiles },
-          outline,
-          files,
-        });
+        const reservation = await assertTokenBudget(generationId, `write:${slug}`, 20_000);
+        let res: Awaited<ReturnType<typeof writePage>>;
+        try {
+          res = await writePage({
+            generationId,
+            ctx,
+            page: { slug, title: row.title, summary: row.summary, files: row.sourceFiles },
+            outline,
+            files,
+          });
+        } catch (error) {
+          await releaseTokenBudget(reservation);
+          throw error;
+        }
+        await settleTokenBudget(reservation, res.tokensIn + res.tokensOut);
         await db()
           .update(pages)
           .set({ markdown: res.markdown, status: "done", error: null, tokens: res.tokensIn + res.tokensOut })

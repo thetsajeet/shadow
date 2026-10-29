@@ -9,7 +9,11 @@ export async function deleteRepoWiki(userId: string, owner: string, name: string
   if (!repo || repo.ownerUserId !== userId) return false;
   await db().transaction(async (tx) => {
     const byRepo = and(eq(jobs.userId, userId), sql`lower(${jobs.owner}) = ${owner.toLowerCase()}`, sql`lower(${jobs.name}) = ${name.toLowerCase()}`);
-    await tx.delete(jobs).where(and(byRepo, inArray(jobs.status, ["done", "error"])));
+    await tx.update(jobs).set({
+      repoId: null,
+      generationId: null,
+      updatedAt: new Date(),
+    }).where(and(byRepo, inArray(jobs.status, ["done", "error"])));
     await tx.update(jobs).set({
       status: "error",
       step: "Cancelled by owner",

@@ -83,8 +83,8 @@ export function redactSecrets(content: string, path: string): string {
     .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g, "[REDACTED]")
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|sk-[A-Za-z0-9_-]{20,})\b/g, "[REDACTED]")
     .replace(
-      /((?:api[_-]?key|access[_-]?token|secret|password|passwd|client[_-]?secret|private[_-]?key|credential)\s*[:=]\s*["']?)([^\s"',;]+)/gi,
-      (match, prefix: string, value: string) => /^(?:replace[-_ ]?me|your[-_ ]|example|sample|changeme|placeholder|<[^>]+>|\$\{)/i.test(value) ? match : `${prefix}[REDACTED]`,
+      /((?:api[_-]?key|access[_-]?token|token|secret|password|passwd|client[_-]?secret|private[_-]?key|credential)["']?\s*[:=]\s*["'])([^"'\r\n]+)(["'])/gi,
+      (match, prefix: string, value: string, suffix: string) => /^(?:replace[-_ ]?me|your[-_ ]|example|sample|changeme|placeholder|<[^>]+>|\$\{)/i.test(value) ? match : `${prefix}[REDACTED]${suffix}`,
     );
 }
 

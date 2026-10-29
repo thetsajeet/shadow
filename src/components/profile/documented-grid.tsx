@@ -52,7 +52,7 @@ function DocCard({ repo, index }: { repo: DocRepo; index: number }) {
           </div>
         </Link>
         <div className="flex justify-end border-t pt-2">
-          <Button type="button" variant="ghost" size="sm" disabled={deleting} onClick={remove} aria-label={`Delete wiki for ${repo.owner}/${repo.name}`}>
+          <Button type="button" variant="ghost" size="sm" disabled={deleting} onClick={remove} aria-label={`Remove wiki for ${repo.owner}/${repo.name}`}>
             <Trash2 className="size-4" /> {deleting ? "Removing…" : "Remove wiki"}
           </Button>
         </div>

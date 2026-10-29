@@ -14,13 +14,16 @@ export function Sidebar({ base, items, active }: { base: string; items: Item[]; 
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const drawer = useRef<HTMLElement>(null);
+  const closeDrawer = () => {
+    setOpen(false);
+    trigger.current?.focus();
+  };
   useEffect(() => {
     if (!open) return;
-    drawer.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+    drawer.current?.querySelector<HTMLElement>("button, a[href]")?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
-        trigger.current?.focus();
+        closeDrawer();
       }
       if (event.key !== "Tab" || !drawer.current) return;
       const focusable = [...drawer.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")];
@@ -66,8 +69,11 @@ export function Sidebar({ base, items, active }: { base: string; items: Item[]; 
       <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r bg-background p-4 pt-6 lg:block">{list}</aside>
       {open && (
         <div className="fixed inset-0 z-50 bg-black/40 lg:hidden">
-          <button type="button" aria-label="Close wiki navigation" className="absolute inset-0 size-full cursor-default" onClick={() => setOpen(false)} />
+          <button type="button" aria-label="Close wiki navigation" className="absolute inset-0 size-full cursor-default" onClick={closeDrawer} />
           <aside ref={drawer} id="wiki-mobile-navigation" role="dialog" aria-modal="true" aria-label="Wiki navigation" className={cn("relative z-10 h-full w-72 overflow-y-auto border-r bg-background p-4 pt-20 shadow-xl")}>
+            <button type="button" aria-label="Close wiki navigation" className="absolute right-4 top-4 rounded-md p-2 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={closeDrawer}>
+              <X className="size-5" />
+            </button>
             {list}
           </aside>
         </div>
