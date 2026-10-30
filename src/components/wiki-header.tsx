@@ -3,6 +3,8 @@ import Link from "next/link";
 import { commitUrl, refFromFullName, repoUrl } from "@/lib/urls";
 import { ThemeToggle } from "./theme-toggle";
 import { Lock } from "lucide-react";
+import { WikiSearch } from "./wiki-search";
+import { WikiFreshness } from "./wiki-freshness";
 
 export function WikiHeader({ repo, branch, sha, active = "wiki", visibility = "public", isOwner = false }: { repo: string; branch: string; sha: string; active?: "wiki" | "chat"; visibility?: "public" | "private"; isOwner?: boolean }) {
   const ref = refFromFullName(repo);
@@ -39,8 +41,12 @@ export function WikiHeader({ repo, branch, sha, active = "wiki", visibility = "p
         <Link href={`${base}/chat`} className={tab(active === "chat")}>
           Ask
         </Link>
+        <a href={`${base}/llms.txt`} className="hidden rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground sm:inline">llms.txt</a>
+        <a href={`${base}/export`} className="hidden rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground sm:inline">Export</a>
+        <WikiFreshness owner={ref.user} repo={ref.repo} isOwner={isOwner} />
       </nav>
       <div className="ml-auto flex items-center gap-1">
+        <WikiSearch owner={ref.user} repo={ref.repo} />
         <a href={repoUrl(ref)} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           GitHub <ExternalLink className="size-3.5" />
         </a>

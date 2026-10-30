@@ -1,19 +1,20 @@
 import { blobUrl } from "../urls";
 import { verifyMarkdown } from "./verify";
-import { contentToText, llmError, makeLlm, withRetry } from "./llm";
+import { contentToText, llmError, makeLlm, traceLlmCall, withRetry } from "./llm";
 import { writeModel, type OutlinePage, type RepoContext } from "./types";
 
 const PER_FILE_CHARS = 12_000;
 const PER_PAGE_CHARS = 48_000;
 
 export interface WriteInput {
+  generationId?: string;
   ctx: RepoContext;
   page: OutlinePage;
   outline: Pick<OutlinePage, "slug" | "title">[];
   files: Record<string, string>;
 }
 
-export async function writePage({ ctx, page, outline, files }: WriteInput) {
+export async function writePage({ generationId, ctx, page, outline, files }: WriteInput) {
   const ref = { user: ctx.owner, repo: ctx.name };
   let budget = PER_PAGE_CHARS;
   const chunks: string[] = [];
@@ -30,6 +31,7 @@ export async function writePage({ ctx, page, outline, files }: WriteInput) {
 
 Page title: ${page.title}
 Page purpose: ${page.summary}
+Repository license: ${ctx.license ?? "not identified"}. Preserve attribution to repository sources and do not reproduce long passages verbatim.
 Other pages in the wiki (link to them where relevant with relative links): ${outline.map((p) => `[${p.title}](/wiki/${ctx.owner}/${ctx.name}/${p.slug})`).join(", ")}
 
 Write a thorough, well-structured page in GitHub-flavoured Markdown. Requirements:
@@ -52,7 +54,12 @@ ${chunks.join("\n\n") || "(no specific files; rely on README and file tree)"}
 ${chunks.length ? "" : `## File tree\n${ctx.tree.slice(0, 200).join("\n")}`}`;
 
   try {
-    const res = await withRetry(() => makeLlm(writeModel(), 0.3).invoke(prompt));
+    const model = writeModel();
+    const llm = makeLlm(model, 0.3);
+    const res = await withRetry(() => traceLlmCall("write", model, generationId, () => llm.invoke(prompt), (result) => ({
+      input: result.usage_metadata?.input_tokens ?? 0,
+      output: result.usage_metadata?.output_tokens ?? 0,
+    })));
     const markdown = contentToText(res.content)
       .replace(/^```(?:markdown|md)\n([\s\S]*?)\n```\s*$/i, "$1")
       .trim();

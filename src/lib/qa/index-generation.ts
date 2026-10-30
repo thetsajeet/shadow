@@ -4,6 +4,9 @@ import { chunks, generations, pages, repoFiles } from "@/db/schema";
 import { logger } from "../logger";
 import { chunkCode, chunkMarkdown, type Chunk } from "./chunk";
 import { embedTexts } from "./embed";
+import { addTokens } from "../generation";
+import { assertTokenBudget, releaseTokenBudget, settleTokenBudget } from "../security-controls";
+import { selectedEmbeddingModel } from "../pipeline/models";
 
 const MAX_CHUNKS = 4000;
 
@@ -59,10 +62,24 @@ export async function indexGeneration(generationId: string): Promise<{ chunks: n
   }
 
   const misses = capped.filter((c) => !(c.blobSha && cache.has(key(c.blobSha, c.startLine, c.endLine))));
-  const vectors = await embedTexts(
-    misses.map((c) => `${c.path}\n${c.content}`),
-    "document",
-  );
+  const embeddingTokens = Math.ceil(misses.reduce((n, c) => n + c.content.length + c.path.length + 1, 0) / 4);
+  const reservation = embeddingTokens > 0
+    ? await assertTokenBudget(generationId, "index", embeddingTokens)
+    : null;
+  let vectors: number[][];
+  try {
+    vectors = await embedTexts(
+      misses.map((c) => `${c.path}\n${c.content}`),
+      "document",
+    );
+  } catch (error) {
+    if (reservation) await releaseTokenBudget(reservation);
+    throw error;
+  }
+  if (reservation) {
+    await settleTokenBudget(reservation, embeddingTokens);
+    await addTokens(generationId, embeddingTokens, 0, selectedEmbeddingModel());
+  }
   const fresh = new Map(misses.map((c, i) => [c, vectors[i]]));
 
   await db().delete(chunks).where(eq(chunks.generationId, generationId));

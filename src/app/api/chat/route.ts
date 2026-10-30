@@ -10,6 +10,8 @@ import { logger } from "@/lib/logger";
 import { runAgent } from "@/lib/qa/agent";
 import { SAFE_SEGMENT } from "@/lib/repo-url";
 import { readMeta } from "@/lib/wiki-store";
+import { assertChatBudget, enforceRequestControls, releaseTokenBudget, settleTokenBudget } from "@/lib/security-controls";
+import { errorResponse } from "@/lib/http";
 
 export const maxDuration = 60;
 
@@ -33,6 +35,11 @@ export async function POST(req: Request) {
 
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Sign in to ask questions", code: "UNAUTHENTICATED" }, { status: 401 });
+  try {
+    await enforceRequestControls(req, "chat");
+  } catch (e) {
+    return errorResponse(e, "POST chat admission");
+  }
 
   const meta = await readMeta(owner, repo, user);
   if (!meta) return NextResponse.json({ error: "No wiki found for this repository" }, { status: 404 });
@@ -50,7 +57,6 @@ export async function POST(req: Request) {
 
   const question = lastUserText(uiMessages);
   if (!question.trim()) return NextResponse.json({ error: "Empty message" }, { status: 400 });
-
   let conversationId = parsed.data.conversationId;
   if (conversationId) {
     const [conv] = await db()
@@ -66,19 +72,29 @@ export async function POST(req: Request) {
   const convId = conversationId;
   await db().insert(messages).values({ conversationId: convId, role: "user", content: question });
 
+  let reservation: Awaited<ReturnType<typeof assertChatBudget>>;
+  try {
+    reservation = await assertChatBudget(user.id);
+  } catch (e) {
+    return errorResponse(e, "POST chat budget");
+  }
   try {
     const result = runAgent(
       { generationId: meta.generationId, owner, name: repo, sha: meta.sha },
       await convertToModelMessages(uiMessages),
-      async (text, tokens) => {
-        await db().insert(messages).values({ conversationId: convId, role: "assistant", content: text, tokens });
+      async (text, tokens, costMicros) => {
+        await settleTokenBudget(reservation, tokens);
+        await db().insert(messages).values({ conversationId: convId, role: "assistant", content: text, tokens, costMicros });
+        logger.info({ userId: user.id, owner, repo, tokens, costMicros }, "chat model usage recorded");
       },
+      async () => releaseTokenBudget(reservation),
     );
     return createUIMessageStreamResponse({
       stream: toUIMessageStream({ stream: result.stream }),
       headers: { "x-conversation-id": convId },
     });
   } catch (e) {
+    await releaseTokenBudget(reservation);
     logger.error({ err: e, owner, repo }, "chat failed");
     return NextResponse.json({ error: "Chat failed" }, { status: 500 });
   }

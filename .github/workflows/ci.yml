@@ -8,6 +8,23 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: shadow
+          POSTGRES_PASSWORD: shadow
+          POSTGRES_DB: shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shadow -d shadow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://shadow:shadow@localhost:5432/shadow
+      DATABASE_URL_DIRECT: postgres://shadow:shadow@localhost:5432/shadow
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,5 +35,8 @@ jobs:
       - run: bunx next typegen
       - run: bun run typecheck
       - run: bun run test
+      - run: bun run db:migrate
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e
       - run: bun run db:check
       - run: bun run build

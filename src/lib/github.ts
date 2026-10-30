@@ -9,6 +9,7 @@ export { SAFE_SEGMENT, parseRepoUrl, type RepoRef } from "./repo-url";
 
 // Don't hold a serverless function open waiting out long GitHub rate-limit windows.
 const MAX_RETRY_WAIT_S = 30;
+const MAX_TARBALL_BYTES = 100 * 1024 * 1024;
 
 const ThrottledOctokit = Octokit.plugin(throttling, retry);
 
@@ -40,6 +41,7 @@ export interface RepoInfo {
   description: string | null;
   sizeKb: number;
   private: boolean;
+  license: string | null;
 }
 
 function status(e: unknown): number | undefined {
@@ -55,11 +57,47 @@ export function mapError(e: unknown, what: string): ShadowError {
   return new ShadowError("INGEST_FAILED", `GitHub error while ${what}: ${e instanceof Error ? e.message : "unknown"}`);
 }
 
+export async function readBoundedStream(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new ShadowError("TOO_LARGE", "Repository archive exceeds the download size limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
 export async function fetchRepoInfo({ user, repo }: RepoRef, userToken?: string): Promise<RepoInfo> {
   try {
     const { data } = await octokit(userToken).rest.repos.get({ owner: user, repo });
     if (!data.default_branch) throw new ShadowError("INGEST_FAILED", "Could not determine the default branch.");
-    return { owner: data.owner.login, name: data.name, defaultBranch: data.default_branch, description: data.description, sizeKb: data.size, private: data.private };
+    return {
+      owner: data.owner.login,
+      name: data.name,
+      defaultBranch: data.default_branch,
+      description: data.description,
+      sizeKb: data.size,
+      private: data.private,
+      license: data.license?.spdx_id ?? null,
+    };
   } catch (e) {
     throw e instanceof ShadowError ? e : mapError(e, "reading repository");
   }
@@ -76,9 +114,29 @@ export async function getHeadSha({ user, repo }: RepoRef, branch: string, userTo
 
 export async function downloadTarball({ user, repo }: RepoRef, sha: string, userToken?: string): Promise<Uint8Array> {
   try {
-    const res = await octokit(userToken).rest.repos.downloadTarballArchive({ owner: user, repo, ref: sha });
-    return new Uint8Array(res.data as ArrayBuffer);
+    const config = env();
+    const response = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(user)}/${encodeURIComponent(repo)}/tarball/${encodeURIComponent(sha)}`,
+      {
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${userToken ?? config.GITHUB_TOKEN}`,
+          "x-github-api-version": "2022-11-28",
+          "user-agent": "shadow-wiki",
+        },
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (!response.ok) throw Object.assign(new Error(`GitHub returned ${response.status}`), { status: response.status });
+    const contentLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_TARBALL_BYTES) {
+      await response.body?.cancel();
+      throw new ShadowError("TOO_LARGE", "Repository archive exceeds the download size limit.");
+    }
+    if (!response.body) throw new ShadowError("INGEST_FAILED", "GitHub returned an empty repository archive.");
+    return await readBoundedStream(response.body, MAX_TARBALL_BYTES);
   } catch (e) {
+    if (e instanceof ShadowError) throw e;
     throw mapError(e, "downloading source");
   }
 }

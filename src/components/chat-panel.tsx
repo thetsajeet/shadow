@@ -4,11 +4,12 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { Bot, FileCode, Loader2, Search, Send, Square, User } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "./copy-button";
+import { TurnstileField } from "@/components/turnstile-field";
 
 const SUGGESTIONS = [
   "What does this project do and how is it structured?",
@@ -75,18 +76,33 @@ function chatErrorMessage(error: Error): string {
 }
 
 export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
-  const [transport] = useState(() => {
+  const [challengeToken, setChallengeToken] = useState("");
+  const setToken = useCallback((token: string) => setChallengeToken(token), []);
+  const resetChallenge = useRef<(() => void) | null>(null);
+  const setChallengeReset = useCallback((reset: (() => void) | null) => {
+    resetChallenge.current = reset;
+  }, []);
+  const transport = useMemo(() => {
     const conv: { id?: string } = {};
     return new DefaultChatTransport<UIMessage>({
       api: "/api/chat",
       fetch: async (input, init) => {
-        const res = await fetch(input, init);
-        conv.id = res.headers.get("x-conversation-id") ?? conv.id;
-        return res;
+        const headers = new Headers(init?.headers);
+        if (challengeToken) headers.set("x-turnstile-token", challengeToken);
+        try {
+          const res = await fetch(input, { ...init, headers });
+          conv.id = res.headers.get("x-conversation-id") ?? conv.id;
+          return res;
+        } finally {
+          if (challengeToken) {
+            setToken("");
+            resetChallenge.current?.();
+          }
+        }
       },
       prepareSendMessagesRequest: ({ messages }) => ({ body: { owner, repo, messages, conversationId: conv.id } }),
     });
-  });
+  }, [challengeToken, owner, repo, setToken]);
   const { messages, sendMessage, status, stop, error } = useChat({ transport });
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -98,13 +114,14 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
 
   const submit = (text: string) => {
     if (!text.trim() || busy) return;
+    if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken) return;
     sendMessage({ text });
     setInput("");
   };
 
   return (
     <div className="mx-auto flex h-[calc(100vh-3.5rem)] max-w-3xl flex-col px-4">
-      <div className="flex-1 space-y-6 overflow-y-auto py-8">
+      <div role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions text" className="flex-1 space-y-6 overflow-y-auto py-8">
         {messages.length === 0 && (
           <div className="mt-16 text-center">
             <Bot className="mx-auto size-10 text-primary" />
@@ -112,7 +129,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
             <p className="mt-1 text-sm text-muted-foreground">Answers are grounded in the code and cite exact lines.</p>
             <div className="mt-6 flex flex-col gap-2">
               {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => submit(s)} className="rounded-lg border px-4 py-2 text-left text-sm transition hover:bg-muted">
+                <button key={s} onClick={() => submit(s)} disabled={!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken} className="rounded-lg border px-4 py-2 text-left text-sm transition hover:bg-muted disabled:opacity-50">
                   {s}
                 </button>
               ))}
@@ -136,8 +153,8 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
             </div>
           </div>
         ))}
-        {status === "submitted" && <Loader2 className="ml-10 size-4 animate-spin text-muted-foreground" />}
-        {error && <p className="ml-10 text-sm text-destructive">{chatErrorMessage(error)}</p>}
+        {status === "submitted" && <Loader2 role="status" aria-label="Generating answer" className="ml-10 size-4 animate-spin text-muted-foreground" />}
+        {error && <p role="alert" className="ml-10 text-sm text-destructive">{chatErrorMessage(error)}</p>}
         <div ref={endRef} />
       </div>
       <form
@@ -152,6 +169,7 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask a question about this codebase…"
           maxLength={2000}
+          aria-label="Ask a question about this codebase"
           className="h-10 flex-1 rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
         />
         {busy ? (
@@ -159,11 +177,12 @@ export function ChatPanel({ owner, repo }: { owner: string; repo: string }) {
             <Square className="size-4" />
           </Button>
         ) : (
-          <Button type="submit" disabled={!input.trim()} aria-label="Send">
+          <Button type="submit" disabled={!input.trim() || (!!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !challengeToken)} aria-label="Send">
             <Send className="size-4" />
           </Button>
         )}
       </form>
+      <TurnstileField onToken={setToken} onResetReady={setChallengeReset} />
     </div>
   );
 }

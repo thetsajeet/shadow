@@ -4,6 +4,7 @@ import { HeroSection } from "@/components/landing/hero-section";
 import { Features, HowItWorks, SiteFooter } from "@/components/landing/sections";
 import { SiteHeader } from "@/components/site-header";
 import { getCurrentUser } from "@/lib/current-user";
+import { RecentWikis } from "@/components/recent-wikis";
 
 async function Landing() {
   await connection();
@@ -14,6 +15,7 @@ async function Landing() {
       <main>
         <HeroSection signedIn={!!user} />
         <Features />
+        <RecentWikis />
         <HowItWorks />
       </main>
       <SiteFooter />

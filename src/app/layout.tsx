@@ -8,6 +8,7 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const fira = Fira_Code({ variable: "--font-fira", subsets: ["latin"] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.BETTER_AUTH_URL ?? "http://localhost:3000"),
   title: "Shadow — instant wikis for GitHub repos",
   description: "Sign in with GitHub and turn your repositories into living documentation, with diagrams, source links and Q&A.",
 };

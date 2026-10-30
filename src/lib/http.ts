@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { ShadowError, toShadowError, type ErrorCode } from "./errors";
 import { logger } from "./logger";
 
@@ -9,7 +10,7 @@ const STATUS: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   PRIVATE: 404,
   TOO_LARGE: 422,
-  RATE_LIMITED: 503,
+  RATE_LIMITED: 429,
   INGEST_FAILED: 502,
   LLM_ERROR: 502,
   BUSY: 409,
@@ -19,6 +20,9 @@ const STATUS: Record<ErrorCode, number> = {
 
 export function errorResponse(e: unknown, context: string) {
   const err = toShadowError(e);
-  if (!(e instanceof ShadowError)) logger.error({ err: e }, `${context} failed`);
+  if (!(e instanceof ShadowError)) {
+    logger.error({ err: e }, `${context} failed`);
+    Sentry.captureException(e, { tags: { context } });
+  }
   return NextResponse.json({ error: err.message, code: err.code }, { status: STATUS[err.code] });
 }
