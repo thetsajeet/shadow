@@ -86,8 +86,17 @@ test.describe.serial("public wiki experience", () => {
 
     await expect(page.getByRole("button", { name: /Search wiki/ })).toHaveAttribute("data-shortcuts-ready", "true");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+    const searchResponse = page.waitForResponse((response) =>
+      response.url().includes(`/api/wiki/${owner}/${repo}/search?q=refund`),
+      { timeout: 15_000 },
+    );
     await page.getByRole("combobox", { name: "Search wiki pages" }).fill("refund");
-    await expect(page.getByRole("option", { name: /Payment and refund flow/ })).toBeVisible();
+    const response = await searchResponse;
+    expect(response.ok()).toBe(true);
+    expect(await response.json()).toMatchObject({
+      results: [expect.objectContaining({ slug: "payments", title: "Payment and refund flow" })],
+    });
+    await expect(page.getByRole("option", { name: /Payment and refund flow/ })).toBeVisible({ timeout: 10_000 });
     await page.getByRole("option", { name: /Payment and refund flow/ }).click();
     await expect(page.getByRole("heading", { name: "Payment and refund flow", exact: true })).toBeVisible();
 
