@@ -49,8 +49,8 @@ export async function enforceRequestControls(req: Request, kind: RequestLimit): 
     .onConflictDoUpdate({
       target: rateLimitCounters.key,
       set: {
-        count: sql`CASE WHEN ${rateLimitCounters.windowStart} < ${start} THEN 1 ELSE ${rateLimitCounters.count} + 1 END`,
-        windowStart: sql`GREATEST(${rateLimitCounters.windowStart}, ${start})`,
+        count: sql`CASE WHEN ${rateLimitCounters.windowStart} < ${start.toISOString()}::timestamptz THEN 1 ELSE ${rateLimitCounters.count} + 1 END`,
+        windowStart: sql`GREATEST(${rateLimitCounters.windowStart}, ${start.toISOString()}::timestamptz)`,
       },
     })
     .returning({ count: rateLimitCounters.count });
